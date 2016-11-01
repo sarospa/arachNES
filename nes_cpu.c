@@ -123,6 +123,68 @@ void test_carry_subtraction(unsigned char operand_a, unsigned char operand_b)
 	}
 }
 
+// Sets the carry flag if a + b would carry, clears it otherwise.
+void test_carry_addition(unsigned char operand_a, unsigned char operand_b)
+{
+	if ((0xFF - operand_a) < operand_b)
+	{
+		status_flags = status_flags | 0b00000001;
+	}
+	else
+	{
+		status_flags = status_flags & 0b11111110;
+	}
+}
+
+// Sets the carry flag to bit 0.
+void test_carry_right_shift(unsigned char byte)
+{
+	if ((byte & 0b1) == 0b1)
+	{
+		status_flags = status_flags | 0b00000001;
+	}
+	else
+	{
+		status_flags = status_flags & 0b11111110;
+	}
+}
+
+// Sets the carry flag to bit 7.
+void test_carry_left_shift(unsigned char byte)
+{
+	if ((byte & 0b10000000) == 0b10000000)
+	{
+		status_flags = status_flags | 0b00000001;
+	}
+	else
+	{
+		status_flags = status_flags & 0b11111110;
+	}
+}
+
+// Sets the overflow flag if the operands, treated as signed bytes, will overflow when added. Clears it otherwise.
+void test_overflow_addition(unsigned char operand_a, unsigned char operand_b)
+{
+	if (operand_a >= 0x80)
+	{
+		operand_a = (~operand_a) + 1;
+	}
+	
+	if (operand_b >= 0x80)
+	{
+		operand_b = (~operand_b) + 1;
+	}
+	
+	if ((operand_a + operand_b) >= 0x80)
+	{
+		status_flags = status_flags | 0b01000000;
+	}
+	else
+	{
+		status_flags = status_flags & 0b10111111;
+	}
+}
+
 // Returns the number of cycles spent.
 unsigned int branch_on_status_flags(char mask, char value, char debug_branch[], char debug_skip[])
 {
@@ -161,6 +223,22 @@ unsigned int branch_on_status_flags(char mask, char value, char debug_branch[], 
 	#endif
 	program_counter += 2;
 	return cycles;
+}
+
+// Pushes a byte to the stack. The stack starts at $01FF and grows downward.
+void push_to_stack(unsigned char byte)
+{
+	unsigned char* stack_top = get_pointer_at_cpu_address(STACK_PAGE + stack_pointer);
+	*stack_top = byte;
+	stack_pointer--;
+}
+
+// Pulls a byte off the stack.
+unsigned char pull_from_stack()
+{
+	stack_pointer++;
+	unsigned char stack_top_byte = *get_pointer_at_cpu_address(STACK_PAGE + stack_pointer);
+	return stack_top_byte;
 }
 
 // Carries out whatever instruction the opcode represents.
@@ -314,11 +392,8 @@ unsigned int run_opcode(unsigned char opcode)
 		{
 			// Take the program counter + 2 and push the high byte to the stack, then the low byte.
 			unsigned int push_value = program_counter + 2;
-			unsigned char* stack_top = get_pointer_at_cpu_address(STACK_PAGE + stack_pointer);
-			*stack_top = push_value / 0x100;
-			stack_top--;
-			*stack_top = push_value % 0x100;
-			stack_pointer -= 2;
+			push_to_stack(push_value / 0x100);
+			push_to_stack(push_value % 0x100);
 			unsigned char low_byte = *get_pointer_at_cpu_address(program_counter + 1);
 			unsigned char high_byte = *get_pointer_at_cpu_address(program_counter + 2);
 			program_counter = low_byte + (high_byte * 0x100);
@@ -333,17 +408,27 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x60:
 		{
 			unsigned int return_address = 0;
-			unsigned char* stack_top = get_pointer_at_cpu_address(STACK_PAGE + stack_pointer);
-			stack_top++;
-			return_address += *stack_top;
-			stack_top++;
-			return_address += *stack_top * 0x100;
-			stack_pointer += 2;
+			return_address += pull_from_stack();
+			return_address += pull_from_stack() * 0x100;
 			// Return address is the next instruction - 1, so we need to add 1 to it.
 			program_counter = return_address + 1;
 			cycles = 6;
 			#ifdef DEBUG
 			if (debug_counter < DEBUG_LIMIT) printf("Return from subroutine to %04X\n", program_counter);
+			#endif
+			break;
+		}
+		// RTI: Return from interrupt. Pops the stack for the status flags, then pops the stack for the return address and jumps back to it.
+		// Implied RTS. Hex: $40  Len: 1  Time:  6
+		// Affects all flags.
+		case 0x40:
+		{
+			status_flags = pull_from_stack();
+			program_counter = pull_from_stack();
+			program_counter += pull_from_stack() * 0x100;
+			cycles = 6;
+			#ifdef DEBUG
+			if (debug_counter < DEBUG_LIMIT) printf("Return from interrupt to %04X\n", program_counter);
 			#endif
 			break;
 		}
@@ -403,6 +488,36 @@ unsigned int run_opcode(unsigned char opcode)
 			cycles = branch_on_status_flags(0b00000010, 0b00000010, "Branch %02X bytes on zero set to address %04X\n", "Skip zero set branch\n");
 			break;
 		}
+		// TAX: Transfers A to X.
+		// Implied TAX. Hex: $AA  Len: 1  Time: 2
+		// Affects flags S and Z.
+		case 0xAA:
+		{
+			x_register = accumulator;
+			test_negative_flag(x_register);
+			test_zero_flag(x_register);
+			program_counter++;
+			cycles = 2;
+			#ifdef DEBUG
+			if (debug_counter < DEBUG_LIMIT) printf("Transfer A to X.\n");
+			#endif
+			break;
+		}
+		// TXA: Transfers X to A.
+		// Implied TXA. Hex: $8A  Len: 1  Time: 2
+		// Affects flags S and Z.
+		case 0x8A:
+		{
+			accumulator = x_register;
+			test_negative_flag(accumulator);
+			test_zero_flag(accumulator);
+			program_counter++;
+			cycles = 2;
+			#ifdef DEBUG
+			if (debug_counter < DEBUG_LIMIT) printf("Transfer X to A.\n");
+			#endif
+			break;
+		}
 		// DEX: Decrements the X register.
 		// Implied DEX. Hex: $CA  Len: 1  Time: 2
 		// Affects flags S and Z.
@@ -430,6 +545,21 @@ unsigned int run_opcode(unsigned char opcode)
 			cycles = 2;
 			#ifdef DEBUG
 			if (debug_counter < DEBUG_LIMIT) printf("Increment X register to %02X\n", x_register);
+			#endif
+			break;
+		}
+		// TAY: Transfers A to Y.
+		// Implied TAY. Hex: $A8  Len: 1  Time: 2
+		// Affects flags S and Z.
+		case 0xA8:
+		{
+			y_register = accumulator;
+			test_negative_flag(y_register);
+			test_zero_flag(y_register);
+			program_counter++;
+			cycles = 2;
+			#ifdef DEBUG
+			if (debug_counter < DEBUG_LIMIT) printf("Transfer A to Y.\n");
 			#endif
 			break;
 		}
@@ -477,6 +607,93 @@ unsigned int run_opcode(unsigned char opcode)
 			cycles = 5;
 			#ifdef DEBUG
 			if (debug_counter < DEBUG_LIMIT) printf("Increment value at zero page address %02X to %02X\n", address_byte, *target);
+			#endif
+			break;
+		}
+		// ADC: Adds a value to the accumulator.
+		// Immediate ADC. Hex: $69  Len: 2  Time: 2
+		// Affects flags S, V, Z, and C.
+		case 0x69:
+		{
+			unsigned char load_byte = *get_pointer_at_cpu_address(program_counter + 1);
+			test_carry_addition(load_byte, accumulator);
+			test_overflow_addition(load_byte, accumulator);
+			accumulator += load_byte;
+			test_negative_flag(accumulator);
+			test_zero_flag(accumulator);
+			program_counter += 2;
+			cycles = 2;
+			#ifdef DEBUG
+			if (debug_counter < DEBUG_LIMIT) printf("Add immediate value %02X to accumulator\n", load_byte);
+			#endif
+			break;
+		}
+		// AND: Performs bitwise AND with the accumulator.
+		// Zero page AND. Hex: $25  Len: 2  Time: 3
+		// Affects flags S and Z.
+		case 0x25:
+		{
+			unsigned char address_byte = *get_pointer_at_cpu_address(program_counter + 1);
+			unsigned char load_byte = *get_pointer_at_cpu_address(address_byte);
+			accumulator = load_byte & accumulator;
+			test_negative_flag(accumulator);
+			test_zero_flag(accumulator);
+			program_counter += 2;
+			cycles = 3;
+			#ifdef DEBUG
+			if (debug_counter < DEBUG_LIMIT) printf("AND the accumulator with value at zero page address %02X to %02X\n", address_byte, accumulator);
+			#endif
+			break;
+		}
+		// EOR: Perform bitwise XOR with the accumulator.
+		// Zero page EOR. Hex: $45  Len: 2  Time: 3
+		// Affects S and Z.
+		case 0x45:
+		{
+			unsigned char address_byte = *get_pointer_at_cpu_address(program_counter + 1);
+			unsigned char load_byte = *get_pointer_at_cpu_address(address_byte);
+			accumulator = load_byte ^ accumulator;
+			test_negative_flag(accumulator);
+			test_zero_flag(accumulator);
+			program_counter += 2;
+			cycles = 3;
+			#ifdef DEBUG
+			if (debug_counter < DEBUG_LIMIT) printf("XOR the accumulator with value at zero page address %02X to %02X\n", address_byte, accumulator);
+			#endif
+			break;
+		}
+		// LSR: Logical shift right.
+		// Accumulator LSR. Hex: $4A  Len: 1  Time: 2
+		// Affects flags S, Z, and C.
+		case 0x4A:
+		{
+			test_carry_right_shift(accumulator);
+			accumulator = accumulator >> 1;
+			test_negative_flag(accumulator);
+			test_zero_flag(accumulator);
+			program_counter++;
+			cycles = 2;
+			#ifdef DEBUG
+			if (debug_counter < DEBUG_LIMIT) printf("Right shift the accumulator to %02X\n", accumulator);
+			#endif
+			break;
+		}
+		// ROL: Rotate left. The byte that falls off the edge goes into carry, and the carry bit goes in the other side.
+		// Zero page ROL. Hex: $26  Len: 2  Time: 5
+		// Affects flags S, Z, and C.
+		case 0x26:
+		{
+			unsigned char address_byte = *get_pointer_at_cpu_address(program_counter + 1);
+			unsigned char* target = get_pointer_at_cpu_address(address_byte);
+			unsigned char carry_bit = status_flags & 0b1;
+			test_carry_left_shift(*target);
+			*target = (*target << 1) | carry_bit;
+			test_negative_flag(*target);
+			test_zero_flag(*target);
+			program_counter += 2;
+			cycles = 5;
+			#ifdef DEBUG
+			if (debug_counter < DEBUG_LIMIT) printf("Right roll the zero page address %02X to %02X\n", address_byte, *target);
 			#endif
 			break;
 		}
@@ -736,6 +953,28 @@ unsigned int run_opcode(unsigned char opcode)
 			#endif
 			break;
 		}
+		// PHA: Push accumulator to the stack.
+		// Implied PHA. Hex: $48  Len: 1  Time: 3
+		case 0x48:
+		{
+			push_to_stack(accumulator);
+			program_counter++;
+			cycles = 3;
+			#ifdef DEBUG
+			if (debug_counter < DEBUG_LIMIT) printf("Push accumulator to the stack\n");
+			#endif
+			break;
+		}
+		case 0x68:
+		{
+			accumulator = pull_from_stack();
+			program_counter++;
+			cycles = 4;
+			#ifdef DEBUG
+			if (debug_counter < DEBUG_LIMIT) printf("Pull stack value to accumulator\n");
+			#endif
+			break;
+		}
 		default:
 		{
 			printf("%04X: Stopping execution on opcode %02X\n", program_counter, opcode);
@@ -743,6 +982,19 @@ unsigned int run_opcode(unsigned char opcode)
 			break;
 		}
 	}
+	
+	if (pending_nmi)
+	{
+		push_to_stack(program_counter / 0x100);
+		push_to_stack(program_counter % 0x100);
+		push_to_stack((status_flags | 0b00100000) & 0b11101111);
+		unsigned char low_address_byte = *get_pointer_at_cpu_address(0xFFFA);
+		unsigned char high_address_byte = *get_pointer_at_cpu_address(0xFFFB);
+		program_counter = low_address_byte + (high_address_byte * 0x100);
+		cycles += 7;
+		pending_nmi = 0;
+	}
+	
 	return cycles;
 }
 

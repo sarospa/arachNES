@@ -34,8 +34,6 @@ List of unimplemented opcodes.
 22
 23
 24: Zero page test bits; BIT $00
-25: Zero page and; AND $00
-26: Zero page rotate left; ROL $00
 27
 28: Pull processor status; PLP
 29: Immediate and; AND #$00
@@ -59,17 +57,13 @@ List of unimplemented opcodes.
 3D: Absolute X and; AND $0000,X
 3E: Absolute X rotate left; ROL $0000,X
 3F
-40: Return from interrupt; RTI
 41: Indirect X xor; EOR ($00,X)
 42
 43
 44
-45: Zero page xor; EOR $00
 46: Zero page shift right; LSR $00
 47
-48: Push accumulator; PHA
 49: Immediate xor; EOR #$00
-4A: Accumulator shift right; LSR A
 4B
 4D: Absolute xor; EOR $0000
 4E: Absolute shift right; LSR $0000
@@ -95,8 +89,6 @@ List of unimplemented opcodes.
 65: Zero page add with carry; ADC $00
 66: Zero page rotate right; ROR $00
 67
-68: Pull accumulator; PLA
-69: Immediate add with carry; ADC #$00
 6A: Accumulator rotate right; ROR A
 6B
 6D: Absolute add with carry; ADC $0000
@@ -123,7 +115,6 @@ List of unimplemented opcodes.
 84: Zero page store Y register; STY $00
 87
 89
-8A: Transfer X to A; TXA
 8B
 8F
 91: Indirect Y store accumulator; STA ($00),Y

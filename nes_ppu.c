@@ -32,6 +32,11 @@ unsigned int bitmap_register_high;
 unsigned char palette_register_1;
 unsigned char palette_register_2;
 
+unsigned char pending_nmi;
+// Treated as two-bit shift registers to detect edges.
+unsigned char nmi_occurred;
+unsigned char nmi_output;
+
 unsigned char* get_pointer_at_ppu_address(unsigned int address)
 {
 	if (address <= 0x1FFF)
@@ -139,6 +144,8 @@ void ppu_init()
 	scanline = 261;
 	scan_pixel = 0;
 	
+	nmi_occurred = 0;
+	
 	ppu_ram = malloc(sizeof(char) * KB * 2);
 	for (int i = 0; i < (KB * 2); i++)
 	{
@@ -212,6 +219,15 @@ unsigned char ppu_tick()
 		case 0x2000:
 		{
 			ppu_control = ppu_bus;
+			// Track current state of nmi output on its low bit.
+			if ((ppu_control & 0b10000000) == 0b10000000)
+			{
+				nmi_output = nmi_output | 0b01;
+			}
+			else
+			{
+				nmi_output = nmi_output & 0b10;
+			}
 			break;
 		}
 		// PPUMASK
@@ -296,6 +312,7 @@ unsigned char ppu_tick()
 		{
 			// Clear the vblank flag.
 			ppu_status = ppu_status & 0b01111111;
+			nmi_occurred = nmi_occurred & 0b10;
 		}
 		else if (scan_pixel == 257 && (!render_disable))
 		{
@@ -364,6 +381,7 @@ unsigned char ppu_tick()
 		{
 			// Set vblank
 			ppu_status = ppu_status | 0b10000000;
+			nmi_occurred = nmi_occurred | 0b01;
 		}
 	}
 	
@@ -380,6 +398,15 @@ unsigned char ppu_tick()
 		scanline = 0;
 		odd_frame = !odd_frame;
 	}
+	
+	if (((nmi_occurred & 0b1) == 1) && ((nmi_output & 0b1) == 1) && ((nmi_occurred == 0b01) || (nmi_output == 0b01)))
+	{
+		pending_nmi = 1;
+	}
+	
+	// Shift the NMI bits into the 'previous frame' bits.
+	nmi_occurred = ((nmi_occurred & 0b1) << 1) | (nmi_occurred & 0b1);
+	nmi_output = ((nmi_output & 0b1) << 1) | (nmi_output & 0b1);
 	
 	return pixel_data;
 }

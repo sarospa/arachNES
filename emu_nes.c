@@ -120,10 +120,6 @@ int main(int argc, char *argv[])
                 base[1] = 85 * render_pixel;
                 base[2] = 85 * render_pixel;
 				base[3] = 0;
-				/*if (render_pixel == 1) base[0] = 255; else base[0] = 0;
-                if (render_pixel == 2) base[1] = 255; else base[1] = 0;
-                if (render_pixel == 3) base[2] = 255; else base[2] = 0;
-				base[3] = 0;*/
 				#endif
 				
 				x++;
