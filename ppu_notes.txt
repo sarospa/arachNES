@@ -1,0 +1,6 @@
+$2005, the ppu scroll register, and $2006, the ppu address register, share a write toggle. During each write, the toggle flips.
+At write toggle == 0, ppu address register writes to the high byte of the VRAM address.
+At write toggle == 1, ppu address register writes to the low byte of the VRAM address. On the PPU, the full address will then be set.
+At write toggle == 0, ppu scroll register takes the high 5 bits as the coarse X scroll, and the low 3 bits as the fine X scroll. The fine X scroll is loaded into the PPU X register.
+At write toggle == 1, ppu scroll register takes the high 5 bits as the coarse Y scroll, and the low 3 bits as the fine Y scroll. The fine Y scroll is set to the 3 high bits of the VRAM address.
+At the start of a new frame, the nametable select from $2000 (ppu control), the coarse Y scroll, and the coarse X scroll are loaded into the lower 12 bits of the VRAM address register.
