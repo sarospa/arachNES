@@ -8,9 +8,6 @@ List of unimplemented opcodes.
 05: Zero page or; ORA $00
 06: Zero page shift left; ASL $00
 07
-08: Push processor status; PHP
-09: Immediate or; ORA #$00
-0A: Accumulator shift left; ASL A
 0B
 0C
 0D: Absolute or; ORA $0000
@@ -33,10 +30,7 @@ List of unimplemented opcodes.
 21: Indirect X and; AND ($00,X)
 22
 23
-24: Zero page test bits; BIT $00
 27
-28: Pull processor status; PLP
-29: Immediate and; AND #$00
 2A: Accumulator rotate left; ROL A
 2B
 2C: Absolute test bits; BIT $0000
@@ -159,7 +153,6 @@ C1: Indirect X compare accumulator; CMP ($00,X)
 C2
 C3
 C4: Zero page compare Y register; $00
-C6: Zero page decrement memory; DEC $00
 C7
 CB
 CC: Absolute compare Y register; $0000

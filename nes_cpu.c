@@ -3,6 +3,10 @@
 #include<stdlib.h>
 #include "nes_cpu.h"
 #include "nes_ppu.h"
+#include "controller.h"
+
+unsigned const char WRITE = 1;
+unsigned const char READ = 0;
 
 unsigned int mapper_type;
 unsigned char accumulator;
@@ -14,12 +18,13 @@ unsigned char status_flags;
 
 unsigned char apu_status;
 
-unsigned char controller_1_port;
-unsigned char controller_2_port;
+// Return this for registers we haven't implemented yet.
+unsigned char dummy;
 
 unsigned char* cpu_ram;
 
-unsigned char* get_pointer_at_cpu_address(unsigned int address)
+// Maps CPU addresses to memory pointers. 'access_type' is a flag to indicate whether it is a read or write access.
+unsigned char* get_pointer_at_cpu_address(unsigned int address, unsigned char access_type)
 {
 	// First 2KB is the NES's own CPU RAM.
 	if (address <= 0x07FF)
@@ -51,17 +56,22 @@ unsigned char* get_pointer_at_cpu_address(unsigned int address)
 	{
 		return &apu_status;
 	}
-	// Controller port 1
-	else if (address == 0x4016)
+	// Controller ports. 0x4017 is weird because it's partly controller part and partly audio stuff?
+	// Will have to figure that out eventually.
+	else if (address == 0x4016 || address == 0x4017)
 	{
-		// TODO: Always returning 0 here for now. Eventually will need to handle unusual behavior of read/write, plus actual input.
-		return &controller_1_port;
+		if (access_type == WRITE)
+		{
+			return write_controller_state(address);
+		}
+		else
+		{
+			return read_controller_state(address);
+		}
 	}
-	// Controller port 2 / APU frame counter???
-	else if (address == 0x4017)
+	else if (address >= 0x4000 && address <= 0x401F)
 	{
-		// TODO: Ditto for port 2.
-		return &controller_2_port;
+		return &dummy;
 	}
 	// Assuming for now that we're using mapper type 0.
 	// 0x8000 through 0xBFFF addresses the first 16KB bytes of ROM.
@@ -192,7 +202,7 @@ unsigned int branch_on_status_flags(char mask, char value, char debug_branch[], 
 	if ((status_flags & mask) == value)
 	{
 		cycles++;
-		unsigned char branch_value = *get_pointer_at_cpu_address(program_counter + 1);
+		unsigned char branch_value = *get_pointer_at_cpu_address(program_counter + 1, READ);
 		unsigned char adjusted_branch_value = branch_value;
 		unsigned int skip_compare = program_counter + 2;
 		// Branch values are signed, so values with the high bit set are negative.
@@ -217,7 +227,6 @@ unsigned int branch_on_status_flags(char mask, char value, char debug_branch[], 
 	#ifdef DEBUG
 	else
 	{
-		debug_counter = 0;
 		if (debug_counter < DEBUG_LIMIT) printf(debug_skip);
 	}
 	#endif
@@ -228,7 +237,7 @@ unsigned int branch_on_status_flags(char mask, char value, char debug_branch[], 
 // Pushes a byte to the stack. The stack starts at $01FF and grows downward.
 void push_to_stack(unsigned char byte)
 {
-	unsigned char* stack_top = get_pointer_at_cpu_address(STACK_PAGE + stack_pointer);
+	unsigned char* stack_top = get_pointer_at_cpu_address(STACK_PAGE + stack_pointer, WRITE);
 	*stack_top = byte;
 	stack_pointer--;
 }
@@ -237,7 +246,7 @@ void push_to_stack(unsigned char byte)
 unsigned char pull_from_stack()
 {
 	stack_pointer++;
-	unsigned char stack_top_byte = *get_pointer_at_cpu_address(STACK_PAGE + stack_pointer);
+	unsigned char stack_top_byte = *get_pointer_at_cpu_address(STACK_PAGE + stack_pointer, READ);
 	return stack_top_byte;
 }
 
@@ -362,8 +371,8 @@ unsigned int run_opcode(unsigned char opcode)
 		// Absolute JMP. Hex: $4C  Len: 3  Time: 3 
 		case 0x4C:
 		{
-			unsigned char low_byte = *get_pointer_at_cpu_address(program_counter + 1);
-			unsigned char high_byte = *get_pointer_at_cpu_address(program_counter + 2);
+			unsigned char low_byte = *get_pointer_at_cpu_address(program_counter + 1, READ);
+			unsigned char high_byte = *get_pointer_at_cpu_address(program_counter + 2, READ);
 			program_counter = low_byte + (high_byte * 0x100);
 			cycles = 3;
 			#ifdef DEBUG
@@ -374,11 +383,11 @@ unsigned int run_opcode(unsigned char opcode)
 		// Indirect JMP. Hex: $6C  Len: 3  Time: 5
 		case 0x6C:
 		{
-			unsigned char low_byte = *get_pointer_at_cpu_address(program_counter + 1);
-			unsigned char high_byte = *get_pointer_at_cpu_address(program_counter + 2);
-			unsigned char indirect_low_byte = *get_pointer_at_cpu_address(low_byte + (high_byte * 0x100));
+			unsigned char low_byte = *get_pointer_at_cpu_address(program_counter + 1, READ);
+			unsigned char high_byte = *get_pointer_at_cpu_address(program_counter + 2, READ);
+			unsigned char indirect_low_byte = *get_pointer_at_cpu_address(low_byte + (high_byte * 0x100), READ);
 			low_byte++; // Intended to overflow to 0x00 if it's at 0xFF.
-			unsigned char indirect_high_byte = *get_pointer_at_cpu_address(low_byte + (high_byte * 0x100));
+			unsigned char indirect_high_byte = *get_pointer_at_cpu_address(low_byte + (high_byte * 0x100), READ);
 			program_counter = indirect_low_byte + (indirect_high_byte * 0x100);
 			cycles = 5;
 			#ifdef DEBUG
@@ -394,8 +403,8 @@ unsigned int run_opcode(unsigned char opcode)
 			unsigned int push_value = program_counter + 2;
 			push_to_stack(push_value / 0x100);
 			push_to_stack(push_value % 0x100);
-			unsigned char low_byte = *get_pointer_at_cpu_address(program_counter + 1);
-			unsigned char high_byte = *get_pointer_at_cpu_address(program_counter + 2);
+			unsigned char low_byte = *get_pointer_at_cpu_address(program_counter + 1, READ);
+			unsigned char high_byte = *get_pointer_at_cpu_address(program_counter + 2, READ);
 			program_counter = low_byte + (high_byte * 0x100);
 			cycles = 6;
 			#ifdef DEBUG
@@ -598,8 +607,8 @@ unsigned int run_opcode(unsigned char opcode)
 		// Affects flags S and Z.
 		case 0xE6:
 		{
-			unsigned char address_byte = *get_pointer_at_cpu_address(program_counter + 1);
-			unsigned char* target = get_pointer_at_cpu_address(address_byte);
+			unsigned char address_byte = *get_pointer_at_cpu_address(program_counter + 1, READ);
+			unsigned char* target = get_pointer_at_cpu_address(address_byte, WRITE);
 			*target += 1;
 			test_negative_flag(*target);
 			test_zero_flag(*target);
@@ -610,12 +619,29 @@ unsigned int run_opcode(unsigned char opcode)
 			#endif
 			break;
 		}
+		// DEC: Decrement memory byte.
+		// Zero page DEC. Hex: $C6  Len: 2  Time: 5
+		// Affects flags S and Z.
+		case 0xC6:
+		{
+			unsigned char address_byte = *get_pointer_at_cpu_address(program_counter + 1, READ);
+			unsigned char* target = get_pointer_at_cpu_address(address_byte, WRITE);
+			*target -= 1;
+			test_negative_flag(*target);
+			test_zero_flag(*target);
+			program_counter += 2;
+			cycles = 5;
+			#ifdef DEBUG
+			if (debug_counter < DEBUG_LIMIT) printf("Decrement value at zero page address %02X to %02X\n", address_byte, *target);
+			#endif
+			break;
+		}
 		// ADC: Adds a value to the accumulator.
 		// Immediate ADC. Hex: $69  Len: 2  Time: 2
 		// Affects flags S, V, Z, and C.
 		case 0x69:
 		{
-			unsigned char load_byte = *get_pointer_at_cpu_address(program_counter + 1);
+			unsigned char load_byte = *get_pointer_at_cpu_address(program_counter + 1, READ);
 			test_carry_addition(load_byte, accumulator);
 			test_overflow_addition(load_byte, accumulator);
 			accumulator += load_byte;
@@ -629,12 +655,26 @@ unsigned int run_opcode(unsigned char opcode)
 			break;
 		}
 		// AND: Performs bitwise AND with the accumulator.
+		// Immediate AND. Hex: $29  Len: 2  Time: 2
+		case 0x29:
+		{
+			unsigned char load_byte = *get_pointer_at_cpu_address(program_counter + 1, READ);
+			accumulator = load_byte & accumulator;
+			test_negative_flag(accumulator);
+			test_zero_flag(accumulator);
+			program_counter += 2;
+			cycles = 2;
+			#ifdef DEBUG
+			if (debug_counter < DEBUG_LIMIT) printf("AND the accumulator with immediate value %02X to %02X\n", load_byte, accumulator);
+			#endif
+			break;
+		}
 		// Zero page AND. Hex: $25  Len: 2  Time: 3
 		// Affects flags S and Z.
 		case 0x25:
 		{
-			unsigned char address_byte = *get_pointer_at_cpu_address(program_counter + 1);
-			unsigned char load_byte = *get_pointer_at_cpu_address(address_byte);
+			unsigned char address_byte = *get_pointer_at_cpu_address(program_counter + 1, READ);
+			unsigned char load_byte = *get_pointer_at_cpu_address(address_byte, READ);
 			accumulator = load_byte & accumulator;
 			test_negative_flag(accumulator);
 			test_zero_flag(accumulator);
@@ -645,13 +685,28 @@ unsigned int run_opcode(unsigned char opcode)
 			#endif
 			break;
 		}
+		// ORA: Performs bitwise OR with the accumulator.
+		// Immediate OR. Hex: $09  Len: 2  Time: 2
+		case 0x09:
+		{
+			unsigned char load_byte = *get_pointer_at_cpu_address(program_counter + 1, READ);
+			accumulator = load_byte | accumulator;
+			test_negative_flag(accumulator);
+			test_zero_flag(accumulator);
+			program_counter += 2;
+			cycles = 2;
+			#ifdef DEBUG
+			if (debug_counter < DEBUG_LIMIT) printf("OR the accumulator with immediate value %02X to %02X\n", load_byte, accumulator);
+			#endif
+			break;
+		}
 		// EOR: Perform bitwise XOR with the accumulator.
 		// Zero page EOR. Hex: $45  Len: 2  Time: 3
 		// Affects S and Z.
 		case 0x45:
 		{
-			unsigned char address_byte = *get_pointer_at_cpu_address(program_counter + 1);
-			unsigned char load_byte = *get_pointer_at_cpu_address(address_byte);
+			unsigned char address_byte = *get_pointer_at_cpu_address(program_counter + 1, READ);
+			unsigned char load_byte = *get_pointer_at_cpu_address(address_byte, READ);
 			accumulator = load_byte ^ accumulator;
 			test_negative_flag(accumulator);
 			test_zero_flag(accumulator);
@@ -678,13 +733,29 @@ unsigned int run_opcode(unsigned char opcode)
 			#endif
 			break;
 		}
+		// ASL: Arithmetic shift left.
+		// Accumulator ASL. Hex: $0A  Len: 1  Time: 2
+		// Affects flags S, Z, and C.
+		case 0x0A:
+		{
+			test_carry_left_shift(accumulator);
+			accumulator = accumulator << 1;
+			test_negative_flag(accumulator);
+			test_zero_flag(accumulator);
+			program_counter++;
+			cycles = 2;
+			#ifdef DEBUG
+			if (debug_counter < DEBUG_LIMIT) printf("Left shift the accumulator to %02X\n", accumulator);
+			#endif
+			break;
+		}
 		// ROL: Rotate left. The byte that falls off the edge goes into carry, and the carry bit goes in the other side.
 		// Zero page ROL. Hex: $26  Len: 2  Time: 5
 		// Affects flags S, Z, and C.
 		case 0x26:
 		{
-			unsigned char address_byte = *get_pointer_at_cpu_address(program_counter + 1);
-			unsigned char* target = get_pointer_at_cpu_address(address_byte);
+			unsigned char address_byte = *get_pointer_at_cpu_address(program_counter + 1, READ);
+			unsigned char* target = get_pointer_at_cpu_address(address_byte, WRITE);
 			unsigned char carry_bit = status_flags & 0b1;
 			test_carry_left_shift(*target);
 			*target = (*target << 1) | carry_bit;
@@ -702,7 +773,7 @@ unsigned int run_opcode(unsigned char opcode)
 		// Affects flags S, C, and Z.
 		case 0xC9:
 		{
-			unsigned char load_byte = *get_pointer_at_cpu_address(program_counter + 1);
+			unsigned char load_byte = *get_pointer_at_cpu_address(program_counter + 1, READ);
 			test_negative_flag(accumulator - load_byte);
 			test_zero_flag(accumulator - load_byte);
 			test_carry_subtraction(accumulator, load_byte);
@@ -713,11 +784,27 @@ unsigned int run_opcode(unsigned char opcode)
 			#endif
 			break;
 		}
+		// BIT: Sets the zero flag to the result of ANDing a memory byte with accumulator, transfers bit 7 and 6 of the memory byte into flags S and V.
+		// Zero page BIT. Hex: $24  Len: 2  Time: 3
+		// Affects flags N, V, and Z.
+		case 0x24:
+		{
+			unsigned char address_byte = *get_pointer_at_cpu_address(program_counter + 1, READ);
+			unsigned char load_byte = *get_pointer_at_cpu_address(address_byte, READ);
+			test_zero_flag(load_byte & accumulator);
+			status_flags = (status_flags & 0b00111111) | (load_byte & 0b11000000);
+			program_counter += 2;
+			cycles = 3;
+			#ifdef DEBUG
+			if (debug_counter < DEBUG_LIMIT) printf("Bit test %02X with accumulator\n", load_byte);
+			#endif
+			break;
+		}
 		// Zero page CMP. Hex: $C5  Len: 2  Time: 3
 		case 0xC5:
 		{
-			unsigned char address_byte = *get_pointer_at_cpu_address(program_counter + 1);
-			unsigned char load_byte = *get_pointer_at_cpu_address(address_byte);
+			unsigned char address_byte = *get_pointer_at_cpu_address(program_counter + 1, READ);
+			unsigned char load_byte = *get_pointer_at_cpu_address(address_byte, READ);
 			test_negative_flag(accumulator - load_byte);
 			test_zero_flag(accumulator - load_byte);
 			test_carry_subtraction(accumulator, load_byte);
@@ -733,7 +820,7 @@ unsigned int run_opcode(unsigned char opcode)
 		// Affects flags S, C, and Z.
 		case 0xE0:
 		{
-			unsigned char load_byte = *get_pointer_at_cpu_address(program_counter + 1);
+			unsigned char load_byte = *get_pointer_at_cpu_address(program_counter + 1, READ);
 			test_negative_flag(x_register - load_byte);
 			test_zero_flag(x_register - load_byte);
 			test_carry_subtraction(x_register, load_byte);
@@ -749,7 +836,7 @@ unsigned int run_opcode(unsigned char opcode)
 		// Affects flags S and Z.
 		case 0xA9:
 		{
-			unsigned char load_byte = *get_pointer_at_cpu_address(program_counter + 1);
+			unsigned char load_byte = *get_pointer_at_cpu_address(program_counter + 1, READ);
 			accumulator = load_byte;
 			test_negative_flag(load_byte);
 			test_zero_flag(load_byte);
@@ -761,10 +848,11 @@ unsigned int run_opcode(unsigned char opcode)
 			break;
 		}
 		// Zero page LDA. Hex: $A5  Len: 2  Time: 3
+		// Affects flags S and Z.
 		case 0xA5:
 		{
-			unsigned char address_byte = *get_pointer_at_cpu_address(program_counter + 1);
-			unsigned char load_byte = *get_pointer_at_cpu_address(address_byte);
+			unsigned char address_byte = *get_pointer_at_cpu_address(program_counter + 1, READ);
+			unsigned char load_byte = *get_pointer_at_cpu_address(address_byte, READ);
 			accumulator = load_byte;
 			test_negative_flag(load_byte);
 			test_zero_flag(load_byte);
@@ -779,9 +867,9 @@ unsigned int run_opcode(unsigned char opcode)
 		// Affects flags S and Z.
 		case 0xAD:
 		{
-			unsigned char low_byte = *get_pointer_at_cpu_address(program_counter + 1);
-			unsigned char high_byte = *get_pointer_at_cpu_address(program_counter + 2);
-			unsigned char load_byte = *get_pointer_at_cpu_address(low_byte + (high_byte * 0x100));
+			unsigned char low_byte = *get_pointer_at_cpu_address(program_counter + 1, READ);
+			unsigned char high_byte = *get_pointer_at_cpu_address(program_counter + 2, READ);
+			unsigned char load_byte = *get_pointer_at_cpu_address(low_byte + (high_byte * 0x100), READ);
 			accumulator = load_byte;
 			test_negative_flag(load_byte);
 			test_zero_flag(load_byte);
@@ -796,10 +884,10 @@ unsigned int run_opcode(unsigned char opcode)
 		// Affects flags S and Z.
 		case 0xBD:
 		{
-			unsigned char low_byte = *get_pointer_at_cpu_address(program_counter + 1);
-			unsigned char high_byte = *get_pointer_at_cpu_address(program_counter + 2);
+			unsigned char low_byte = *get_pointer_at_cpu_address(program_counter + 1, READ);
+			unsigned char high_byte = *get_pointer_at_cpu_address(program_counter + 2, READ);
 			unsigned int address = low_byte + (high_byte * 0x100);
-			unsigned char load_byte = *get_pointer_at_cpu_address(address + x_register);
+			unsigned char load_byte = *get_pointer_at_cpu_address(address + x_register, READ);
 			accumulator = load_byte;
 			test_negative_flag(load_byte);
 			test_zero_flag(load_byte);
@@ -819,11 +907,11 @@ unsigned int run_opcode(unsigned char opcode)
 		// Affects flags S and Z.
 		case 0xB1:
 		{
-			unsigned char indirect_address_byte = *get_pointer_at_cpu_address(program_counter + 1);
-			unsigned char low_byte = *get_pointer_at_cpu_address(indirect_address_byte);
-			unsigned char high_byte = *get_pointer_at_cpu_address(indirect_address_byte + 1);
+			unsigned char indirect_address_byte = *get_pointer_at_cpu_address(program_counter + 1, READ);
+			unsigned char low_byte = *get_pointer_at_cpu_address(indirect_address_byte, READ);
+			unsigned char high_byte = *get_pointer_at_cpu_address(indirect_address_byte + 1, READ);
 			unsigned int address = low_byte + (high_byte * 0x100);
-			unsigned char load_byte = *get_pointer_at_cpu_address(address + y_register);
+			unsigned char load_byte = *get_pointer_at_cpu_address(address + y_register, READ);
 			accumulator = load_byte;
 			test_negative_flag(load_byte);
 			test_zero_flag(load_byte);
@@ -844,7 +932,7 @@ unsigned int run_opcode(unsigned char opcode)
 		// Affects flags S and Z.
 		case 0xA2:
 		{
-			unsigned char load_byte = *get_pointer_at_cpu_address(program_counter + 1);
+			unsigned char load_byte = *get_pointer_at_cpu_address(program_counter + 1, READ);
 			x_register = load_byte;
 			test_negative_flag(load_byte);
 			test_zero_flag(load_byte);
@@ -859,7 +947,7 @@ unsigned int run_opcode(unsigned char opcode)
 		// Immediate LDY. Hex: $A0  Len: 2  Time: 2
 		case 0xA0:
 		{
-			unsigned char load_byte = *get_pointer_at_cpu_address(program_counter + 1);
+			unsigned char load_byte = *get_pointer_at_cpu_address(program_counter + 1, READ);
 			y_register = load_byte;
 			test_negative_flag(load_byte);
 			test_zero_flag(load_byte);
@@ -874,8 +962,8 @@ unsigned int run_opcode(unsigned char opcode)
 		// Zero page STA. Hex: $85  Len: 2  Time: 3
 		case 0x85:
 		{
-			unsigned char address_byte = *get_pointer_at_cpu_address(program_counter + 1);
-			unsigned char* target = get_pointer_at_cpu_address(address_byte);
+			unsigned char address_byte = *get_pointer_at_cpu_address(program_counter + 1, READ);
+			unsigned char* target = get_pointer_at_cpu_address(address_byte, WRITE);
 			*target = accumulator;
 			program_counter += 2;
 			cycles = 3;
@@ -887,9 +975,9 @@ unsigned int run_opcode(unsigned char opcode)
 		// Absolute STA. Hex: $8D  Len: 3  Time: 4
 		case 0x8D:
 		{
-			unsigned char low_byte = *get_pointer_at_cpu_address(program_counter + 1);
-			unsigned char high_byte = *get_pointer_at_cpu_address(program_counter + 2);
-			unsigned char* target = get_pointer_at_cpu_address(low_byte + (high_byte * 0x100));
+			unsigned char low_byte = *get_pointer_at_cpu_address(program_counter + 1, READ);
+			unsigned char high_byte = *get_pointer_at_cpu_address(program_counter + 2, READ);
+			unsigned char* target = get_pointer_at_cpu_address(low_byte + (high_byte * 0x100), WRITE);
 			*target = accumulator;
 			program_counter += 3;
 			cycles = 4;
@@ -902,8 +990,8 @@ unsigned int run_opcode(unsigned char opcode)
 		// Zero Page STX. Hex: $86  Len: 2  Time: 3
 		case 0x86:
 		{
-			unsigned char operand = *get_pointer_at_cpu_address(program_counter + 1);
-			unsigned char* target = get_pointer_at_cpu_address(operand);
+			unsigned char operand = *get_pointer_at_cpu_address(program_counter + 1, READ);
+			unsigned char* target = get_pointer_at_cpu_address(operand, WRITE);
 			*target = x_register;
 			program_counter += 2;
 			cycles = 3;
@@ -915,9 +1003,9 @@ unsigned int run_opcode(unsigned char opcode)
 		// Absolute STX. Hex: $8E  Len: 3  Time: 4
 		case 0x8E:
 		{
-			unsigned char low_byte = *get_pointer_at_cpu_address(program_counter + 1);
-			unsigned char high_byte = *get_pointer_at_cpu_address(program_counter + 2);
-			unsigned char* target = get_pointer_at_cpu_address(low_byte + (high_byte * 0x100));
+			unsigned char low_byte = *get_pointer_at_cpu_address(program_counter + 1, READ);
+			unsigned char high_byte = *get_pointer_at_cpu_address(program_counter + 2, READ);
+			unsigned char* target = get_pointer_at_cpu_address(low_byte + (high_byte * 0x100), WRITE);
 			*target = x_register;
 			program_counter += 3;
 			cycles = 4;
@@ -930,9 +1018,9 @@ unsigned int run_opcode(unsigned char opcode)
 		// Absolute STY. Hex: $8C  Len: 3  Time: 4
 		case 0x8C:
 		{
-			unsigned char low_byte = *get_pointer_at_cpu_address(program_counter + 1);
-			unsigned char high_byte = *get_pointer_at_cpu_address(program_counter + 2);
-			unsigned char* target = get_pointer_at_cpu_address(low_byte + (high_byte * 0x100));
+			unsigned char low_byte = *get_pointer_at_cpu_address(program_counter + 1, READ);
+			unsigned char high_byte = *get_pointer_at_cpu_address(program_counter + 2, READ);
+			unsigned char* target = get_pointer_at_cpu_address(low_byte + (high_byte * 0x100), WRITE);
 			*target = y_register;
 			program_counter += 3;
 			cycles = 4;
@@ -965,9 +1053,14 @@ unsigned int run_opcode(unsigned char opcode)
 			#endif
 			break;
 		}
+		// PLA: Pull accumulator from the stack.
+		// Implied PLA. Hex: $68  Len: 1  Time: 3
+		// Affects flags S and Z.
 		case 0x68:
 		{
 			accumulator = pull_from_stack();
+			test_zero_flag(accumulator);
+			test_negative_flag(accumulator);
 			program_counter++;
 			cycles = 4;
 			#ifdef DEBUG
@@ -975,10 +1068,36 @@ unsigned int run_opcode(unsigned char opcode)
 			#endif
 			break;
 		}
+		// PHP: Push status flags to the stack.
+		// Implied PHP. Hex: $08  Len: 1  Time: 3
+		case 0x08:
+		{
+			push_to_stack(status_flags);
+			program_counter++;
+			cycles = 3;
+			#ifdef DEBUG
+			if (debug_counter < DEBUG_LIMIT) printf("Push status flags to the stack\n");
+			#endif
+			break;
+		}
+		// PLP: Pull status flags from the stack.
+		// Implied PLP. Hex: $28  Len: 1  Time: 4
+		case 0x28:
+		{
+			status_flags = pull_from_stack();
+			program_counter++;
+			cycles = 4;
+			#ifdef DEBUG
+			if (debug_counter < DEBUG_LIMIT) printf("Pull stack value to status flags\n");
+			#endif
+			break;
+		}
 		default:
 		{
-			printf("%04X: Stopping execution on opcode %02X\n", program_counter, opcode);
-			exit_emulator();
+			//printf("%04X: Stopping execution on opcode %02X\n", program_counter, opcode);
+			printf("%04X: unhandled opcode %02X\n", program_counter, opcode);
+			//exit_emulator();
+			program_counter++;
 			break;
 		}
 	}
@@ -988,8 +1107,8 @@ unsigned int run_opcode(unsigned char opcode)
 		push_to_stack(program_counter / 0x100);
 		push_to_stack(program_counter % 0x100);
 		push_to_stack((status_flags | 0b00100000) & 0b11101111);
-		unsigned char low_address_byte = *get_pointer_at_cpu_address(0xFFFA);
-		unsigned char high_address_byte = *get_pointer_at_cpu_address(0xFFFB);
+		unsigned char low_address_byte = *get_pointer_at_cpu_address(0xFFFA, READ);
+		unsigned char high_address_byte = *get_pointer_at_cpu_address(0xFFFB, READ);
 		program_counter = low_address_byte + (high_address_byte * 0x100);
 		cycles += 7;
 		pending_nmi = 0;
@@ -1006,6 +1125,8 @@ void cpu_init()
 	y_register = 0;
 	stack_pointer = 0xFF;
 	status_flags = 0;
+	
+	apu_status = 0;
 	
 	cpu_ram = malloc(sizeof(char) * KB * 2);
 	

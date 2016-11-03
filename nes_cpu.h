@@ -11,6 +11,9 @@ extern const int PRG_ROM_PAGE;
 extern const int CHR_ROM_PAGE;
 extern const int STACK_PAGE;
 
+extern unsigned const char WRITE;
+extern unsigned const char READ;
+
 extern unsigned int mapper_type;
 extern unsigned char accumulator;
 extern unsigned char x_register;
@@ -42,6 +45,6 @@ void exit_emulator();
 
 void cpu_init();
 unsigned int run_opcode(unsigned char opcode);
-unsigned char* get_pointer_at_cpu_address(unsigned int address);
+unsigned char* get_pointer_at_cpu_address(unsigned int address, unsigned char write);
 
 #endif
