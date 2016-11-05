@@ -40,7 +40,7 @@ unsigned int chr_rom_size;
 SDL_GameController* pad;
 
 // TODO LIST
-// VRAM mirroring
+// Nametable mirroring
 // Mappers
 // OAM (sprites)
 // Sound
@@ -87,8 +87,8 @@ int main(int argc, char *argv[])
 	#if RENDER
 	const unsigned int TEXTURE_WIDTH = 256;
 	const unsigned int TEXTURE_HEIGHT = 240;
-	const unsigned int WINDOW_WIDTH = TEXTURE_WIDTH;
-    const unsigned int WINDOW_HEIGHT = TEXTURE_HEIGHT;
+	const unsigned int WINDOW_WIDTH = TEXTURE_WIDTH * 2;
+    const unsigned int WINDOW_HEIGHT = TEXTURE_HEIGHT * 2;
 	
 	SDL_Init(SDL_INIT_TIMER | SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_JOYSTICK);
     SDL_CreateWindowAndRenderer(WINDOW_WIDTH, WINDOW_HEIGHT, 0, &window, &renderer);
@@ -205,7 +205,6 @@ int main(int argc, char *argv[])
 									break;
 								}
 							}
-							printf("Current controller state: %02X\n", controller_1_data);
 							break;
 						}
 						case SDL_CONTROLLERBUTTONUP:
@@ -253,7 +252,6 @@ int main(int argc, char *argv[])
 									break;
 								}
 							}
-							printf("Current controller state: %02X\n", controller_1_data);
 							break;
 						}
 						case SDL_KEYDOWN:
@@ -304,7 +302,6 @@ int main(int argc, char *argv[])
 										break;
 									}
 								}
-								printf("Current controller state: %02X\n", controller_1_data);
 							}
 							break;
 						}
@@ -356,7 +353,6 @@ int main(int argc, char *argv[])
 										break;
 									}
 								}
-								printf("Current controller state: %02X\n", controller_1_data);
 							}
 							break;
 						}

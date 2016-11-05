@@ -196,14 +196,6 @@ void load_render_registers()
 	// Write the high byte from the pattern table to the low byte of the high bitmap register.
 	bitmap_register_high = (bitmap_register_high & 0xFF00) | *get_pointer_at_ppu_address(pattern_address | 0b1000);
 	
-	/*printf("Loading pattern %02X/%02X from VRAM address %04X with fine scroll %02X at scanline %d, pixel %d\n",
-		(bitmap_register_high & 0xFF),
-		(bitmap_register_low & 0xFF),
-		vram_address & 0b111111111111,
-		fine_y_scroll,
-		scanline,
-		scan_pixel);*/
-	
 	increment_vram_horz();
 }
 
@@ -339,7 +331,6 @@ unsigned char ppu_tick()
 			if ((scan_pixel > 0) && (scan_pixel <= 256))
 			{
 				pixel_data = 0;
-				//printf("PPU sending pixel %d at scanline %d, pixel %d\n", pixel_data, scanline, scan_pixel);
 			}
 		}
 		else
@@ -357,7 +348,6 @@ unsigned char ppu_tick()
 				pixel_data = ((bitmap_register_low >> 15) & 0b1) | ((bitmap_register_high >> 14) & 0b10);
 				bitmap_register_low = (bitmap_register_low << 1) % 0xFFFF;
 				bitmap_register_high = (bitmap_register_high << 1) % 0xFFFF;
-				//printf("PPU sending pixel %d at scanline %d, pixel %d\n", pixel_data, scanline, scan_pixel);
 			}
 			else if (scan_pixel == 257)
 			{

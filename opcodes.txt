@@ -1,17 +1,12 @@
 List of unimplemented opcodes.
 
-00: break; BRK
 01: Indirect X or; ORA ($00,X)
 02
 03
 04
-05: Zero page or; ORA $00
-06: Zero page shift left; ASL $00
 07
 0B
 0C
-0D: Absolute or; ORA $0000
-0E: Absolute shift left; ASL $0000
 0F
 11: Indirect Y or; ORA ($00),Y
 12
@@ -31,11 +26,7 @@ List of unimplemented opcodes.
 22
 23
 27
-2A: Accumulator rotate left; ROL A
 2B
-2C: Absolute test bits; BIT $0000
-2D: Absolute and; AND $0000
-2E: Absolute rotate left; ROL $0000
 2F
 31: Indirect Y and; AND ($00),Y
 32
@@ -55,12 +46,8 @@ List of unimplemented opcodes.
 42
 43
 44
-46: Zero page shift right; LSR $00
 47
-49: Immediate xor; EOR #$00
 4B
-4D: Absolute xor; EOR $0000
-4E: Absolute shift right; LSR $0000
 4F
 51: Indirect Y xor; EOR($00),Y
 52
@@ -80,91 +67,61 @@ List of unimplemented opcodes.
 62
 63
 64
-65: Zero page add with carry; ADC $00
-66: Zero page rotate right; ROR $00
 67
-6A: Accumulator rotate right; ROR A
-6B
-6D: Absolute add with carry; ADC $0000
-6E: Absolute rotate right; ROR $0000
+ 
 6F
 71: Indirect Y add with carry; ADC ($00),Y
 72
 73
 74
-75: Zero page X add with carry; ADC $00,X
 76: Zero page X rotate right; ROR $00,X
 77
-79: Absolute Y add with carry; ADC $0000,Y
 7A
 7B
 7C
-7D: Absolute X add with carry; ADC $0000,X
 7E: Absolute X rotate right; ROR $0000,X
 7F
 80
 81: Indirect X store accumulator; STA ($00,X)
 82
 83
-84: Zero page store Y register; STY $00
 87
 89
 8B
 8F
-91: Indirect Y store accumulator; STA ($00),Y
 92
 93
 94: Zero page X store Y register; STY $00,X
-95: Zero page X store accumulator; STA $00,X
 96: Zero page Y store X register; $00,Y
 97
-98: Transfer Y to A; TYA
-99: Absolute Y store accumulator; STA $0000,Y
 9B
 9C
-9D: Absolute X store accumulator; STA $0000,X
 9E
 9F
 A1: Indirect X load accumulator; LDA ($00,X)
 A3
-A4: Zero page load Y register; LDY $00
-A6: Zero page load X register; LDX $00
 A7
-A8: Transfer A to Y; TAY
-AA: Transfer A to X; TAX
 AB
-AC: Absolute load Y register; LDY $0000
-AE: Absolute load X register; LDX $0000
 AF
 B2
 B3
-B4: Zero page X load Y register; LDY $00,Y
-B5: Zero page X load accumulator; LDA $00,X
 B6: Zero page Y load X register; LDX $00,Y
 B7
-B9: Absolute Y load accumulator; LDA $0000,Y
-BA: Transfer stack pointer to X; TSX
 BB
 BC: Absolute X load Y register; LDY $0000,X
 BE: Absolute Y load X register; LDX $0000,Y
 BF
-C0: Immediate compare Y register; #$00
 C1: Indirect X compare accumulator; CMP ($00,X)
 C2
 C3
-C4: Zero page compare Y register; $00
 C7
 CB
-CC: Absolute compare Y register; $0000
-CD: Absolute compare accumulator; CMP $0000
-CE: Absolute decrement memory; DEC $0000
 CF
 D1: Indirect Y compare accumulator; CMP ($00),Y
 D2
 D3
 D4
 D5: Zero page X compare accumulator; CMP $00,X
-D6: Zero page X decrement memory; DEC $00,X
 D7
 D9: Absolute Y compare accumulator; CMP $0000,Y
 DA
@@ -176,26 +133,18 @@ DF
 E1: Indirect X subtract with carry; SBC ($00,X)
 E2
 E3
-E4: Zero page compare X register; CPX $00
-E5: Zero page subtract with carry; SBC $00
 E7
-E9: Immediate subtract with carry; SBC #$00
 EB
-EC: Absolute compare X register; CPX $0000
-ED: Absolute subtract with carry; SBC $0000
-EE: Absolute increment memory; INC $0000
 EF
 F1: Indirect Y subtract with carry; SBC ($00),Y
 F2
 F3
 F4
 F5: Zero page X subtract with carry; SBC $00,X
-F6: Zero page X increment memory; INC $00,X
 F7
 F9: Absolute Y subtract with carry; SBC $0000,Y
 FA
 FB
 FC
 FD: Absolute X subtract with carry; SBC $0000,X
-FE: Absolute X increment memory; INC $0000,X
 FF
