@@ -1,6 +1,5 @@
 List of unimplemented opcodes.
 
-01: Indirect X or; ORA ($00,X)
 02
 03
 04
@@ -8,143 +7,100 @@ List of unimplemented opcodes.
 0B
 0C
 0F
-11: Indirect Y or; ORA ($00),Y
 12
 13
 14
-15: Zero page X or; ORA $00,X
-16: Zero page X shift left; ASL $00,X
 17
-19: Absolute Y or; ORA $0000,Y
 1A
 1B
 1C
-1D: Absolute X or; ORA $0000,X
-1E: Absolute shift left X; ASL $0000,X
 1F
-21: Indirect X and; AND ($00,X)
 22
 23
 27
 2B
 2F
-31: Indirect Y and; AND ($00),Y
 32
 33
 34
-35: Zero page X and; AND $00,X
-36: Zero page X rotate left; ROL $00,X
 37
-39: Absolute Y and; AND $0000,Y
 3A
 3B
 3C
-3D: Absolute X and; AND $0000,X
-3E: Absolute X rotate left; ROL $0000,X
 3F
-41: Indirect X xor; EOR ($00,X)
 42
 43
 44
 47
 4B
 4F
-51: Indirect Y xor; EOR($00),Y
 52
 53
 54
-55: Zero page X xor; EOR $00,X
-56: Zero page X shift right; 
 57
-59: Absolute Y xor; EOR $0000,Y
 5A
 5B
 5C
-5D: Absolute X xor; EOR $0000,X
-5E: Absolute X shift right; LSR $0000,X
 5F
-61: Indirect X add with carry; ADC ($00,X)
 62
 63
 64
 67
- 
 6F
-71: Indirect Y add with carry; ADC ($00),Y
 72
 73
 74
-76: Zero page X rotate right; ROR $00,X
 77
 7A
 7B
 7C
-7E: Absolute X rotate right; ROR $0000,X
 7F
 80
-81: Indirect X store accumulator; STA ($00,X)
 82
 83
 87
 89
 8B
 8F
-92
+92 
 93
-94: Zero page X store Y register; STY $00,X
-96: Zero page Y store X register; $00,Y
 97
 9B
 9C
 9E
 9F
-A1: Indirect X load accumulator; LDA ($00,X)
 A3
 A7
 AB
 AF
 B2
 B3
-B6: Zero page Y load X register; LDX $00,Y
 B7
 BB
-BC: Absolute X load Y register; LDY $0000,X
-BE: Absolute Y load X register; LDX $0000,Y
 BF
-C1: Indirect X compare accumulator; CMP ($00,X)
 C2
 C3
 C7
 CB
 CF
-D1: Indirect Y compare accumulator; CMP ($00),Y
 D2
 D3
 D4
-D5: Zero page X compare accumulator; CMP $00,X
 D7
-D9: Absolute Y compare accumulator; CMP $0000,Y
 DA
 DB
 DC
-DD: Absolute X compare accumulator; CMP $0000,X
-DE: Absolute X decrement memory; DEC $0000,X
 DF
-E1: Indirect X subtract with carry; SBC ($00,X)
 E2
 E3
 E7
 EB
 EF
-F1: Indirect Y subtract with carry; SBC ($00),Y
 F2
 F3
 F4
-F5: Zero page X subtract with carry; SBC $00,X
 F7
-F9: Absolute Y subtract with carry; SBC $0000,Y
 FA
 FB
 FC
-FD: Absolute X subtract with carry; SBC $0000,X
 FF

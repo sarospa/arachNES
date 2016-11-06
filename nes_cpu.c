@@ -127,7 +127,7 @@ unsigned int absolute_indexed_address(unsigned char offset, unsigned int* cycles
 	unsigned char low_byte = *get_pointer_at_cpu_address(program_counter + 1, READ);
 	unsigned char high_byte = *get_pointer_at_cpu_address(program_counter + 2, READ);
 	unsigned int address = low_byte + (high_byte * 0x100);
-	unsigned int indexed_address = address + offset;
+	unsigned int indexed_address = (address + offset) % 0x10000;
 	if ((address & 0xFF00) != (indexed_address & 0xFF00))
 	{
 		*cycles += 1;
@@ -139,16 +139,33 @@ unsigned int zero_page_indirect_address()
 {
 	unsigned char indirect_address_byte = *get_pointer_at_cpu_address(program_counter + 1, READ);
 	unsigned char low_byte = *get_pointer_at_cpu_address(indirect_address_byte, READ);
-	unsigned char high_byte = *get_pointer_at_cpu_address(indirect_address_byte + 1, READ);
+	unsigned char high_byte = *get_pointer_at_cpu_address((indirect_address_byte + 1) % 0x100, READ);
 	return low_byte + (high_byte * 0x100);
 }
 
+// Adds the index before looking up the indirect address. Always uses the x register as the index.
 unsigned int preindexed_indirect_address()
 {
-	unsigned char indirect_address_byte = *get_pointer_at_cpu_address(program_counter + x_register + 1, READ);
+	unsigned char indirect_address_byte = *get_pointer_at_cpu_address(program_counter + 1, READ) + x_register;
 	unsigned char low_byte = *get_pointer_at_cpu_address(indirect_address_byte, READ);
-	unsigned char high_byte = *get_pointer_at_cpu_address(indirect_address_byte + 1, READ);
-	return low_byte + (high_byte * 0x100);
+	unsigned char high_byte = *get_pointer_at_cpu_address((indirect_address_byte + 1) % 0x100, READ);
+	unsigned int address = low_byte + (high_byte * 0x100);
+	return address;
+}
+
+// Adds the index after looking up the indirect address. Always uses the y register as the index.
+unsigned int postindexed_indirect_address(unsigned int* cycles)
+{
+	unsigned char indirect_address_byte = *get_pointer_at_cpu_address(program_counter + 1, READ);
+	unsigned char low_byte = *get_pointer_at_cpu_address(indirect_address_byte, READ);
+	unsigned char high_byte = *get_pointer_at_cpu_address((indirect_address_byte + 1) % 0x100, READ);
+	unsigned int address = low_byte + (high_byte * 0x100);
+	unsigned int indexed_address = (address + y_register) % 0x10000;
+	if ((address & 0xFF00) != (indexed_address & 0xFF00))
+	{
+		*cycles += 1;
+	}
+	return indexed_address;
 }
 
 // Sets the negative flag if the high bit of the input is set, clears it otherwise.
@@ -257,7 +274,7 @@ void test_carry_left_shift(unsigned char byte)
 }
 
 // Returns the number of cycles spent.
-unsigned int branch_on_status_flags(char mask, char value)
+unsigned int branch_on_status_flags(unsigned char mask, unsigned char value)
 {
 	unsigned int cycles = 2;
 	if ((status_flags & mask) == value)
@@ -782,6 +799,19 @@ unsigned int run_opcode(unsigned char opcode)
 			cycles = 6;
 			break;
 		}
+		// Absolute,X DEC. Hex: $DE  Len: 3  Time: 7
+		// Affects flags S and Z.
+		case 0xDE:
+		{
+			unsigned int address = absolute_address() + x_register;
+			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
+			*target -= 1;
+			test_negative_flag(*target);
+			test_zero_flag(*target);
+			program_counter += 3;
+			cycles = 7;
+			break;
+		}
 		// ADC: Adds a value to the accumulator.
 		// Immediate ADC. Hex: $69  Len: 2  Time: 2
 		// Affects flags S, V, Z, and C.
@@ -849,6 +879,28 @@ unsigned int run_opcode(unsigned char opcode)
 			program_counter += 3;
 			break;
 		}
+		// Indirect,X ADC. Hex: $61  Len: 2  Time: 6
+		// Affects flags S, V, Z, and C.
+		case 0x61:
+		{
+			unsigned int address = preindexed_indirect_address();
+			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			add_with_carry(load_byte);
+			program_counter += 2;
+			cycles = 6;
+			break;
+		}
+		// Indirect,Y ADC. Hex: $71  Len: 2  Time: 5 + 1 [if page boundary crossed]
+		// Affects flags S, V, Z, and C.
+		case 0x71:
+		{
+			cycles = 5;
+			unsigned int address = postindexed_indirect_address(&cycles);
+			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			add_with_carry(load_byte);
+			program_counter += 2;
+			break;
+		}
 		// SBC: Subtracts a value from the accumulator.
 		// Immediate SBC. Hex: $E9  Len: 2  Time: 2
 		// Affects flags S, V, Z, and C.
@@ -872,6 +924,17 @@ unsigned int run_opcode(unsigned char opcode)
 			cycles = 3;
 			break;
 		}
+		// Zero page,X SBC. Hex: $F5  Len: 2  Time: 4
+		// Affects flags S, V, Z, and C.
+		case 0xF5:
+		{
+			unsigned int address = zero_page_indexed_address(x_register);
+			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			subtract_with_carry(load_byte);
+			program_counter += 2;
+			cycles = 4;
+			break;
+		}
 		// Absolute SBC. Hex: $ED  Len: 3  Time: 4
 		// Affects flags S, V, Z, and C.
 		case 0xED:
@@ -881,6 +944,50 @@ unsigned int run_opcode(unsigned char opcode)
 			subtract_with_carry(load_byte);
 			program_counter += 3;
 			cycles = 4;
+			break;
+		}
+		// Absolute,X SBC. Hex: $FD  Len: 3  Time: 4 + 1 [if crossed page boundary]
+		// Affects flags S, V, Z, and C.
+		case 0xFD:
+		{
+			cycles = 4;
+			unsigned int address = absolute_indexed_address(x_register, &cycles);
+			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			subtract_with_carry(load_byte);
+			program_counter += 3;
+			break;
+		}
+		// Absolute,Y SBC. Hex: $F9  Len: 3  Time: 4 + 1 [if crossed page boundary]
+		// Affects flags S, V, Z, and C.
+		case 0xF9:
+		{
+			cycles = 4;
+			unsigned int address = absolute_indexed_address(y_register, &cycles);
+			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			subtract_with_carry(load_byte);
+			program_counter += 3;
+			break;
+		}
+		// Indirect,X SBC. Hex: $E1  Len: 2  Time: 6
+		// Affects flags S, V, Z, and C.
+		case 0xE1:
+		{
+			unsigned int address = preindexed_indirect_address();
+			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			subtract_with_carry(load_byte);
+			program_counter += 2;
+			cycles = 6;
+			break;
+		}
+		// Indirect,Y SBC. Hex: $F1  Len: 2  Time: 5 + 1 [if crossed page boundary]
+		// Affects flags S, V, Z, and C.
+		case 0xF1:
+		{
+			cycles = 5;
+			unsigned int address = postindexed_indirect_address(&cycles);
+			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			subtract_with_carry(load_byte);
+			program_counter += 2;
 			break;
 		}
 		// AND: Performs bitwise AND with the accumulator.
@@ -928,6 +1035,50 @@ unsigned int run_opcode(unsigned char opcode)
 			cycles = 4;
 			break;
 		}
+		// Absolute,X AND. Hex: $3D  Len: 3  Time: 4 + 1 [if crossed page boundary]
+		// Affects flags S and Z.
+		case 0x3D:
+		{
+			cycles = 4;
+			unsigned int address = absolute_indexed_address(x_register, &cycles);
+			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			bitwise_and(load_byte);
+			program_counter += 3;
+			break;
+		}
+		// Absolute,Y AND. Hex: $39  Len: 3  Time: 4 + 1 [if crossed page boundary]
+		// Affects flags S and Z.
+		case 0x39:
+		{
+			cycles = 4;
+			unsigned int address = absolute_indexed_address(y_register, &cycles);
+			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			bitwise_and(load_byte);
+			program_counter += 3;
+			break;
+		}
+		// Indirect,X AND. Hex: $21  Len: 2  Time: 6
+		// Affects flags S and Z.
+		case 0x21:
+		{
+			unsigned int address = preindexed_indirect_address();
+			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			bitwise_and(load_byte);
+			program_counter += 2;
+			cycles = 6;
+			break;
+		}
+		// Indirect,Y AND. Hex: $31  Len: 2  Time: 5 + 1 [if crossed page boundary]
+		// Affects flags S and Z.
+		case 0x31:
+		{
+			cycles = 5;
+			unsigned int address = postindexed_indirect_address(&cycles);
+			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			bitwise_and(load_byte);
+			program_counter += 2;
+			break;
+		}
 		// ORA: Performs bitwise OR with the accumulator.
 		// Immediate ORA. Hex: $09  Len: 2  Time: 2
 		// Affects flags S and Z.
@@ -951,6 +1102,17 @@ unsigned int run_opcode(unsigned char opcode)
 			cycles = 3;
 			break;
 		}
+		// Zero page,X ORA. Hex: $15  Len: 2  Time: 4
+		// Affects flags S and Z.
+		case 0x15:
+		{
+			unsigned int address = zero_page_indexed_address(x_register);
+			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			bitwise_or(load_byte);
+			program_counter += 2;
+			cycles = 4;
+			break;
+		}
 		// Absolute ORA. Hex: $0D  Len: 3  Time: 4
 		// Affects flags S and Z.
 		case 0x0D:
@@ -960,6 +1122,49 @@ unsigned int run_opcode(unsigned char opcode)
 			bitwise_or(load_byte);
 			program_counter += 3;
 			cycles = 4;
+			break;
+		}
+		// Absolute,X ORA. Hex: $1D  Len: 3  Time: 4 + 1 [if crossed page boundary]
+		// Affects flags S and Z.
+		case 0x1D:
+		{
+			cycles = 4;
+			unsigned int address = absolute_indexed_address(x_register, &cycles);
+			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			bitwise_or(load_byte);
+			program_counter += 3;
+			break;
+		}
+		// Absolute,Y ORA. Hex: $19  Len: 3  Time: 4 + 1 [if crossed page boundary]
+		// Affects flags S and Z.
+		case 0x19:
+		{
+			cycles = 4;
+			unsigned int address = absolute_indexed_address(y_register, &cycles);
+			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			bitwise_or(load_byte);
+			program_counter += 3;
+			break;
+		}
+		// Indirect,X ORA. Hex: $01  Len: 2  Time: 6
+		// Affects flags S and Z.
+		case 0x01:
+		{
+			unsigned int address = preindexed_indirect_address();
+			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			bitwise_or(load_byte);
+			program_counter += 2;
+			cycles = 6;
+			break;
+		}
+		// Indirect,Y ORA. Hex: $11  Len: 2  Time: 5 + 1 [if crossed page boundary]
+		case 0x11:
+		{
+			cycles = 5;
+			unsigned int address = postindexed_indirect_address(&cycles);
+			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			bitwise_or(load_byte);
+			program_counter += 2;
 			break;
 		}
 		// EOR: Perform bitwise XOR with the accumulator.
@@ -985,6 +1190,17 @@ unsigned int run_opcode(unsigned char opcode)
 			cycles = 3;
 			break;
 		}
+		// Zero page,X EOR. Hex: $55  Len: 2  Time: 4
+		// Affects S and Z.
+		case 0x55:
+		{
+			unsigned int address = zero_page_indexed_address(x_register);
+			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			bitwise_xor(load_byte);
+			program_counter += 2;
+			cycles = 4;
+			break;
+		}
 		// Absolute EOR. Hex: $4D  Len: 3  Time: 4
 		// Affects flags S and Z.
 		case 0x4D:
@@ -994,6 +1210,50 @@ unsigned int run_opcode(unsigned char opcode)
 			bitwise_xor(load_byte);
 			program_counter += 3;
 			cycles = 4;
+			break;
+		}
+		// Absolute,X EOR. Hex: $5D  Len: 3  Time: 4 + 1 [if crossed page boundary]
+		// Affects flags S and Z.
+		case 0x5D:
+		{
+			cycles = 4;
+			unsigned int address = absolute_indexed_address(x_register, &cycles);
+			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			bitwise_xor(load_byte);
+			program_counter += 3;
+			break;
+		}
+		// Absolute,Y EOR. Hex: $59  Len: 3  Time: 4 + 1 [if crossed page boundary]
+		// Affects flags S and Z.
+		case 0x59:
+		{
+			cycles = 4;
+			unsigned int address = absolute_indexed_address(y_register, &cycles);
+			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			bitwise_xor(load_byte);
+			program_counter += 3;
+			break;
+		}
+		// Indirect,X EOR. Hex: $41  Len: 2  Time: 6
+		// Affects flags S and Z.
+		case 0x41:
+		{
+			unsigned int address = preindexed_indirect_address();
+			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			bitwise_xor(load_byte);
+			program_counter += 3;
+			cycles = 4;
+			break;
+		}
+		// Indirect,Y EOR. Hex: $51  Len: 2  Time: 5 + 1 [if crossed page boundary]
+		// Affects flags S and Z.
+		case 0x51:
+		{
+			cycles = 5;
+			unsigned int address = postindexed_indirect_address(&cycles);
+			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			bitwise_xor(load_byte);
+			program_counter += 2;
 			break;
 		}
 		// LSR: Logical shift right.
@@ -1017,6 +1277,17 @@ unsigned int run_opcode(unsigned char opcode)
 			cycles = 5;
 			break;
 		}
+		// Zero page,X LSR. Hex: $56  Len: 2  Time: 6
+		// Affects flags S, Z, and C.
+		case 0x56:
+		{
+			unsigned int address = zero_page_indexed_address(x_register);
+			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
+			*target = logical_shift_right(*target);
+			program_counter += 2;
+			cycles = 6;
+			break;
+		}
 		// Absolute LSR. Hex: $4E  Len: 3  Time: 6
 		// Affects flags S, Z, and C.
 		case 0x4E:
@@ -1026,6 +1297,17 @@ unsigned int run_opcode(unsigned char opcode)
 			*target = logical_shift_right(*target);
 			program_counter += 3;
 			cycles = 6;
+			break;
+		}
+		// Absolute,X LSR. Hex: $5E  Len: 3  Time: 7
+		// Affects flags S, Z, and C.
+		case 0x5E:
+		{
+			unsigned int address = absolute_address() + x_register;
+			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
+			*target = logical_shift_right(*target);
+			program_counter += 3;
+			cycles = 7;
 			break;
 		}
 		// ASL: Arithmetic shift left.
@@ -1049,6 +1331,16 @@ unsigned int run_opcode(unsigned char opcode)
 			cycles = 5;
 			break;
 		}
+		// Zero page,X ASL. Hex: $16  Len: 2  Time: 6
+		case 0x16:
+		{
+			unsigned int address = zero_page_indexed_address(x_register);
+			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
+			*target = arithmetic_shift_left(*target);
+			program_counter += 2;
+			cycles = 6;
+			break;
+		}
 		// Absolute ASL. Hex: $0E  Len: 3  Time: 6
 		// Affects flags S, Z, and C.
 		case 0x0E:
@@ -1058,6 +1350,17 @@ unsigned int run_opcode(unsigned char opcode)
 			*target = arithmetic_shift_left(*target);
 			program_counter += 3;
 			cycles = 6;
+			break;
+		}
+		// Absolute,X ASL. Hex: $1E  Len: 3  Time: 7
+		// Affects flags S, Z, and C.
+		case 0x1E:
+		{
+			unsigned int address = absolute_address() + x_register;
+			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
+			*target = arithmetic_shift_left(*target);
+			program_counter += 3;
+			cycles = 7;
 			break;
 		}
 		// ROL: Rotate left. The byte that falls off the edge goes into carry, and the carry bit goes in the other side.
@@ -1081,6 +1384,17 @@ unsigned int run_opcode(unsigned char opcode)
 			cycles = 5;
 			break;
 		}
+		// Zero page,X ROL. Hex: $36  Len: 2  Time: 6
+		// Affects flags S, Z, and C.
+		case 0x36:
+		{
+			unsigned int address = zero_page_indexed_address(x_register);
+			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
+			*target = rotate_left(*target);
+			program_counter += 2;
+			cycles = 6;
+			break;
+		}
 		// Absolute ROL. Hex: $2E  Len: 3  Time: 6
 		// Affects flags S, Z, and C.
 		case 0x2E:
@@ -1090,6 +1404,17 @@ unsigned int run_opcode(unsigned char opcode)
 			*target = rotate_left(*target);
 			program_counter += 3;
 			cycles = 6;
+			break;
+		}
+		// Absolute,X ROL. Hex: $3E  Len: 3  Time: 7
+		// Affects flags S, Z, and C.
+		case 0x3E:
+		{
+			unsigned int address = absolute_address() + x_register;
+			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
+			*target = rotate_left(*target);
+			program_counter += 3;
+			cycles = 7;
 			break;
 		}
 		// ROR: Rotate right. The byte that falls off the edge goes into carry, and the carry bit goes in the other side.
@@ -1113,6 +1438,17 @@ unsigned int run_opcode(unsigned char opcode)
 			cycles = 5;
 			break;
 		}
+		// Zero page,X ROR. Hex: $76  Len: 2  Time: 6
+		// Affects flags S, Z, and C.
+		case 0x76:
+		{
+			unsigned int address = zero_page_indexed_address(x_register);
+			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
+			*target = rotate_right(*target);
+			program_counter += 2;
+			cycles = 6;
+			break;
+		}
 		// Absolute ROR. Hex: $6E  Len: 3  Time: 6
 		// Affects flags S, Z, and C.
 		case 0x6E:
@@ -1122,6 +1458,17 @@ unsigned int run_opcode(unsigned char opcode)
 			*target = rotate_right(*target);
 			program_counter += 3;
 			cycles = 6;
+			break;
+		}
+		// Absolute,X ROR. Hex: $7E  Len: 3  Time: 7
+		// Affects flags S, Z, and C.
+		case 0x7E:
+		{
+			unsigned int address = absolute_address() + x_register;
+			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
+			*target = rotate_right(*target);
+			program_counter += 3;
+			cycles = 7;
 			break;
 		}
 		// CMP: Compares the accumulator to a value, and sets the sign, carry, and zero flags accordingly.
@@ -1147,6 +1494,17 @@ unsigned int run_opcode(unsigned char opcode)
 			cycles = 3;
 			break;
 		}
+		// Zero page,X CMP. Hex: $D5  Len: 2  Time: 4
+		// Affects flags S, Z, and C.
+		case 0xD5:
+		{
+			unsigned int address = zero_page_indexed_address(x_register);
+			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			compare_register(accumulator, load_byte);
+			program_counter += 2;
+			cycles = 4;
+			break;
+		}
 		// Absolute CMP. Hex: $CD  Len: 3  Time: 4
 		// Affects flags S, Z, and C.
 		case 0xCD:
@@ -1156,6 +1514,50 @@ unsigned int run_opcode(unsigned char opcode)
 			compare_register(accumulator, load_byte);
 			program_counter += 3;
 			cycles = 4;
+			break;
+		}
+		// Absolute,X CMP. Hex: $DD  Len: 3  Time: 4 + 1 [if crossed page boundary]
+		// Affects flags S, Z, and C.
+		case 0xDD:
+		{
+			cycles = 4;
+			unsigned int address = absolute_indexed_address(x_register, &cycles);
+			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			compare_register(accumulator, load_byte);
+			program_counter += 3;
+			break;
+		}
+		// Absolute,Y CMP. Hex: $D9  Len: 3  Time: 4 + 1 [if crossed page boundary]
+		// Affects flags S, Z, and C.
+		case 0xD9:
+		{
+			cycles = 4;
+			unsigned int address = absolute_indexed_address(y_register, &cycles);
+			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			compare_register(accumulator, load_byte);
+			program_counter += 3;
+			break;
+		}
+		// Indirect,X CMP. Hex: $C1  Len: 2  Time: 6
+		// Affects flags S, Z, and C.
+		case 0xC1:
+		{
+			unsigned int address = preindexed_indirect_address();
+			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			compare_register(accumulator, load_byte);
+			program_counter += 2;
+			cycles = 6;
+			break;
+		}
+		// Indirect,Y CMP. Hex: $D1  Len: 2  Time: 5 + 1 [if crossed page boundary]
+		// Affects flags S, Z, and C.
+		case 0xD1:
+		{
+			cycles = 5;
+			unsigned int address = postindexed_indirect_address(&cycles);
+			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			compare_register(accumulator, load_byte);
+			program_counter += 2;
 			break;
 		}
 		// CPX: Compares the X register to a value, and sets the sign, carry, and zero flags accordingly.
@@ -1307,6 +1709,7 @@ unsigned int run_opcode(unsigned char opcode)
 			break;
 		}
 		// Absolute,Y LDA. Hex: $B9  Len: 3  Time: 4 + 1 [if crossed page boundary]
+		// Affects flags S and Z.
 		case 0xB9:
 		{
 			cycles = 4;
@@ -1316,20 +1719,25 @@ unsigned int run_opcode(unsigned char opcode)
 			program_counter += 3;
 			break;
 		}
+		// Indirect,X LDA. Hex: $A1  Len: 2  Time: 6
+		case 0xA1:
+		{
+			unsigned int address = preindexed_indirect_address();
+			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			load_register(&accumulator, load_byte);
+			program_counter += 2;
+			cycles = 6;
+			break;
+		}
 		// Indirect,Y LDA. Hex: $B1  Len: 2  Time: 5 + 1 [if crossed page boundary]
 		// Affects flags S and Z.
 		case 0xB1:
 		{
-			unsigned int address = zero_page_indirect_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address + y_register, READ);
+			cycles = 5;
+			unsigned int address = postindexed_indirect_address(&cycles);
+			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
 			load_register(&accumulator, load_byte);
 			program_counter += 2;
-			cycles = 5;
-			// Add a cycle if page boundary crossed.
-			if ((address & 0xFF00) != ((address + y_register) & 0xFF00))
-			{
-				cycles++;
-			}
 			break;
 		}
 		// LDX: Loads a byte into the X register.
@@ -1355,6 +1763,17 @@ unsigned int run_opcode(unsigned char opcode)
 			cycles = 3;
 			break;
 		}
+		// Zero page,Y LDX. Hex: $B6  Len: 2  Time: 4
+		// Affects flags S and Z.
+		case 0xB6:
+		{
+			unsigned int address = zero_page_indexed_address(y_register);
+			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			load_register(&x_register, load_byte);
+			program_counter += 2;
+			cycles = 4;
+			break;
+		}
 		// Absolute LDX. Hex $AE  Len: 3  Time: 4
 		// Affects flags S and Z.
 		case 0xAE:
@@ -1364,6 +1783,17 @@ unsigned int run_opcode(unsigned char opcode)
 			load_register(&x_register, load_byte);
 			program_counter += 3;
 			cycles = 4;
+			break;
+		}
+		// Absolute,Y LDX. Hex: $BE  Len: 3  Time: 4 + 1 [if crossed page boundary]
+		// Affects flags S and Z.
+		case 0xBE:
+		{
+			cycles = 4;
+			unsigned int address = absolute_indexed_address(y_register, &cycles);
+			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			load_register(&x_register, load_byte);
+			program_counter += 3;
 			break;
 		}
 		// LDY: Loads a byte into the Y register.
@@ -1409,6 +1839,17 @@ unsigned int run_opcode(unsigned char opcode)
 			load_register(&y_register, load_byte);
 			program_counter += 3;
 			cycles = 4;
+			break;
+		}
+		// Absolute,X LDY. Hex: $BC  Len: 3  Time: 4 + 1 [if crossed page boundary]
+		// Affects flags S and Z.
+		case 0xBC:
+		{
+			cycles = 4;
+			unsigned int address = absolute_indexed_address(x_register, &cycles);
+			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			load_register(&y_register, load_byte);
+			program_counter += 3;
 			break;
 		}
 		// STA: Stores the accumulator in the address specified by the operand.
@@ -1462,11 +1903,21 @@ unsigned int run_opcode(unsigned char opcode)
 			cycles = 5;
 			break;
 		}
+		// Indirect,X STA. Hex: $81  Len: 2  Time: 6
+		case 0x81:
+		{
+			unsigned int address = preindexed_indirect_address();
+			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
+			*target = accumulator;
+			program_counter += 2;
+			cycles = 6;
+			break;
+		}
 		// Indirect,Y STA. Hex: $91  Len: 2  Time: 6
 		case 0x91:
 		{
-			unsigned int address = zero_page_indirect_address();
-			unsigned char* target = get_pointer_at_cpu_address(address + y_register, WRITE);
+			unsigned int address = zero_page_indirect_address() + y_register;
+			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
 			*target = accumulator;
 			program_counter += 2;
 			cycles = 6;
@@ -1481,6 +1932,16 @@ unsigned int run_opcode(unsigned char opcode)
 			*target = x_register;
 			program_counter += 2;
 			cycles = 3;
+			break;
+		}
+		// Zero page,Y STX. Hex: $96  Len: 2  Time: 4
+		case 0x96:
+		{
+			unsigned address = zero_page_indexed_address(y_register);
+			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
+			*target = x_register;
+			program_counter += 2;
+			cycles = 4;
 			break;
 		}
 		// Absolute STX. Hex: $8E  Len: 3  Time: 4
@@ -1502,6 +1963,16 @@ unsigned int run_opcode(unsigned char opcode)
 			*target = y_register;
 			program_counter += 2;
 			cycles = 3;
+			break;
+		}
+		// Zero page,X STY. Hex: $94  Len: 2  Time: 4
+		case 0x94:
+		{
+			unsigned int address = zero_page_indexed_address(x_register);
+			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
+			*target = y_register;
+			program_counter += 2;
+			cycles = 4;
 			break;
 		}
 		// Absolute STY. Hex: $8C  Len: 3  Time: 4
@@ -1563,8 +2034,6 @@ unsigned int run_opcode(unsigned char opcode)
 			push_to_stack(status_flags);
 			program_counter++;
 			cycles = 3;
-			#ifdef DEBUG
-			#endif
 			break;
 		}
 		// PLP: Pull status flags from the stack.
@@ -1574,8 +2043,6 @@ unsigned int run_opcode(unsigned char opcode)
 			status_flags = pull_from_stack();
 			program_counter++;
 			cycles = 4;
-			#ifdef DEBUG
-			#endif
 			break;
 		}
 		// BRK: Triggers an interrupt.
