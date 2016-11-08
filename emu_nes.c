@@ -36,7 +36,8 @@ struct Color* palette;
 
 // TODO LIST
 // Mappers
-// OAM (sprites)
+// 8x16 sprite mode
+// Sprite priority
 // Sound
 // Scrolling
 // Most of PPUCTRL, PPUMASK

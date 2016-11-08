@@ -18,6 +18,8 @@ unsigned char stack_pointer;
 unsigned char status_flags;
 
 unsigned char apu_status;
+unsigned char oam_dma_active;
+unsigned char oam_dma_page;
 
 // Return this for registers we haven't implemented yet.
 unsigned char dummy;
@@ -38,8 +40,13 @@ unsigned char* get_pointer_at_cpu_address(unsigned int address, unsigned char ac
 	else if (address >= 0x2000 && address <= 0x3FFF)
 	{
 		int ppu_register = 0x2000 + (address % 8);
-		notify_ppu(ppu_register);
+		notify_ppu(ppu_register, access_type);
 		return &ppu_bus;
+	}
+	else if (address == 0x4014)
+	{
+		oam_dma_active = 1;
+		return &oam_dma_page;
 	}
 	// APU status
 	else if (address == 0x4015)
@@ -2147,6 +2154,21 @@ unsigned int run_opcode(unsigned char opcode)
 		pending_nmi = 0;
 	}
 	
+	// Writes 256 bytes to the OAM, filling it up.
+	if (oam_dma_active)
+	{
+		for (int i = 0; i < 0x100; i++)
+		{
+			unsigned char load_byte = *get_pointer_at_cpu_address((oam_dma_page * 0x100) | i, READ);
+			ppu_bus = load_byte;
+			// Little bit of a hack to make sure the OAM address updates properly.
+			notify_ppu_write(0x2004);
+		}
+		// OAM DMA takes 513 cycles, +1 on odd cycles. I don't have any detection for odd cycles right now, so I won't worry about that.
+		cycles += 513;
+		oam_dma_active = 0;
+	}
+	
 	return cycles;
 }
 
@@ -2160,6 +2182,7 @@ void cpu_init()
 	status_flags = 0;
 	
 	apu_status = 0;
+	oam_dma_active = 0;
 	
 	cpu_ram = malloc(sizeof(char) * KB * 2);
 	
