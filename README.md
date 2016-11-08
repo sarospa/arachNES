@@ -10,3 +10,5 @@ There's lots of debugging junk at the moment. I'll try not to make commits that 
 I'm not including any ROMs here, for what I hope are fairly obvious reasons, but a number of test ROMs can be found at http://wiki.nesdev.com/w/index.php/Emulator_tests The one I'm working with right now is nestest.
 
 Inputs now work! Current settings are: arrow keys for D-pad, shift for select, enter for start, Z for A, and X for B. Configurable mappings will come later. Also supports controllers, if you can get that to work it should work about as expected, probably.
+
+The emulator gets its palette from palettes\ntscpalette.pal. The palette will likely be subject to change, and you can use your own if you want. It was generated with http://bisqwit.iki.fi/utils/nespalette.php or you could modify it yourself - it's just 64 RGB triplets.
