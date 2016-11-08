@@ -2,6 +2,8 @@
 #include<string.h>
 #include<stdlib.h>
 #include "nes_ppu.h"
+#include "nes_cpu.h"
+#include "cartridge.h"
 
 unsigned char* ppu_ram;
 unsigned char* palette_ram;
@@ -29,8 +31,9 @@ unsigned int scan_pixel;
 
 unsigned int bitmap_register_low;
 unsigned int bitmap_register_high;
-unsigned char palette_register_1;
-unsigned char palette_register_2;
+unsigned char palette_register_low;
+unsigned char palette_register_high;
+unsigned char palette_latch;
 
 unsigned char pending_nmi;
 // Treated as two-bit shift registers to detect edges.
@@ -41,18 +44,12 @@ unsigned char* get_pointer_at_ppu_address(unsigned int address)
 {
 	if (address <= 0x1FFF)
 	{
-		// Pattern tables, not 100% sure this is how it works?
-		return &chr_rom[address];
+		return get_pointer_at_chr_address(address);
 	}
-	else if (address >= 0x2000 && address <= 0x2FFF)
+	else if (address >= 0x2000 && address <= 0x3EFF)
 	{
-		// The PPU's internal RAM, with nametables and stuff.
-		return &ppu_ram[address - 0x2000];
-	}
-	else if (address >= 0x3000 && address <= 0x3EFF)
-	{
-		// Mirror of the PPU's RAM.
-		return &ppu_ram[address - 0x3000];
+		// Pass the address to the cartridge to handle mirroring and such.
+		return get_pointer_at_nametable_address(address);
 	}
 	else if (address >= 0x3F00 && address <= 0x3FFF)
 	{
@@ -65,12 +62,6 @@ unsigned char* get_pointer_at_ppu_address(unsigned int address)
 		exit_emulator();
 		return NULL;
 	}
-}
-
-unsigned char* get_pointer_at_nametable_address(int address)
-{
-	// Return a value inside the nametable's address space.
-	return get_pointer_at_ppu_address(0x2000 | (address & 0x0FFF));
 }
 
 unsigned char* get_pointer_at_attribute_table_address(int address)
@@ -186,15 +177,18 @@ void load_render_registers()
 	unsigned char pattern_byte = *get_pointer_at_nametable_address(vram_address & 0b111111111111);
 	// An address in the pattern table is encoded thus:
 	// 0HRRRR CCCCPTTT
-	// H is which half of the sprite table. Left at 0 for now.
+	// H is which half of the sprite table.
 	// P is which bit plane we're in. We need both the low and the high one.
 	// TTT is the fine y offset. We get that from which scanline is being drawn.
 	// It seems that the part stored in the nametable is RRRR CCCC, indicating the tile row and column.
-	unsigned int pattern_address = (pattern_byte * 0b10000) | fine_y_scroll;
+	unsigned int pattern_address = ((ppu_control & 0b10000) << 8) | (pattern_byte * 0b10000) | fine_y_scroll;
 	// Write the low byte from the pattern table to the low byte of the low bitmap register.
 	bitmap_register_low = (bitmap_register_low & 0xFF00) | *get_pointer_at_ppu_address(pattern_address);
 	// Write the high byte from the pattern table to the low byte of the high bitmap register.
 	bitmap_register_high = (bitmap_register_high & 0xFF00) | *get_pointer_at_ppu_address(pattern_address | 0b1000);
+	unsigned char attribute_byte = *get_pointer_at_attribute_table_address(vram_address & 0b111111111111);
+	unsigned char attribute_tile_select = ((vram_address >> 1) & 0b1) + ((vram_address >> 5) & 0b10);
+	palette_latch = (attribute_byte >> (attribute_tile_select * 2)) & 0b11;
 	
 	increment_vram_horz();
 }
@@ -204,7 +198,6 @@ void load_render_registers()
 unsigned char ppu_tick()
 {
 	unsigned pixel_data = 255;
-	
 	switch(register_accessed)
 	{
 		// PPUCTRL
@@ -294,7 +287,6 @@ unsigned char ppu_tick()
 		}
 	}
 	register_accessed = 0;
-	
 	unsigned char render_disable = (ppu_mask & 0b00011000) == 0;
 	
 	// pre-render scanline
@@ -345,9 +337,12 @@ unsigned char ppu_tick()
 				}
 				// Eventually we'll have to implement fine scrolling to select which bit we want to use.
 				// Right now, always selecting bit 15 for no scrolling.
-				pixel_data = ((bitmap_register_low >> 15) & 0b1) | ((bitmap_register_high >> 14) & 0b10);
-				bitmap_register_low = (bitmap_register_low << 1) % 0xFFFF;
-				bitmap_register_high = (bitmap_register_high << 1) % 0xFFFF;
+				unsigned char palette_address = ((bitmap_register_low >> 15) & 0b1) | ((bitmap_register_high >> 14) & 0b10) | ((palette_register_low >> 5) & 0b100) | ((palette_register_high >> 4) & 0b1000);
+				pixel_data = *get_pointer_at_ppu_address(0x3F00 + palette_address);
+				bitmap_register_low = (bitmap_register_low << 1) & 0xFFFF;
+				bitmap_register_high = (bitmap_register_high << 1) & 0xFFFF;
+				palette_register_low = ((palette_register_low << 1) & 0xFF) | (palette_latch & 0b1);
+				palette_register_high = ((palette_register_high << 1) & 0xFF) | ((palette_latch & 0b10) >> 1);
 			}
 			else if (scan_pixel == 257)
 			{

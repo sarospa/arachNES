@@ -4,6 +4,7 @@
 #include "nes_cpu.h"
 #include "nes_ppu.h"
 #include "controller.h"
+#include "cartridge.h"
 
 unsigned const char WRITE = 1;
 unsigned const char READ = 0;
@@ -22,28 +23,16 @@ unsigned char apu_status;
 unsigned char dummy;
 
 unsigned char* cpu_ram;
-unsigned char* prg_ram;
 
 // Maps CPU addresses to memory pointers. 'access_type' is a flag to indicate whether it is a read or write access.
 unsigned char* get_pointer_at_cpu_address(unsigned int address, unsigned char access_type)
 {
 	// First 2KB is the NES's own CPU RAM.
-	if (address <= 0x07FF)
-	{
-		return &cpu_ram[address];
-	}
 	// 0x0800 through 0x1FFF mirrors CPU RAM three times.
-	else if (address >= 0x0800 && address <= 0x0FFF)
+	if (address <= 0x1FFF)
 	{
-		return &cpu_ram[address - 0x0800];
-	}
-	else if (address >= 0x1000 && address <= 0x17FF)
-	{
-		return &cpu_ram[address - 0x1000];
-	}
-	else if (address >= 0x1800 && address <= 0x1FFF)
-	{
-		return &cpu_ram[address - 0x1800];
+		unsigned int cpu_ram_address = address % 0x800;
+		return &cpu_ram[cpu_ram_address];
 	}
 	// PPU registers. Found in 0x2000 through 0x2007, but they're mirrored every 8 bytes.
 	else if (address >= 0x2000 && address <= 0x3FFF)
@@ -74,22 +63,9 @@ unsigned char* get_pointer_at_cpu_address(unsigned int address, unsigned char ac
 	{
 		return &dummy;
 	}
-	else if (address >= 0x6000 && address <= 0x7FFF)
+	else if (address >= 0x6000 && address <= 0xFFFF)
 	{
-		return &prg_ram[address - 0x6000];
-	}
-	// Assuming for now that we're using mapper type 0.
-	// 0x8000 through 0xBFFF addresses the first 16KB bytes of ROM.
-	else if (address >= 0x8000 && address <= 0xBFFF)
-	{
-		return &prg_rom[address - 0x8000];
-	}
-	// 0xC000 through 0xFFFF mirrors the first 16KB bytes of ROM.
-	// Note: If there are 32KB bytes of ROM, they would be found here instead.
-	// I'll worry about that later.
-	else if (address >= 0xC000 && address <= 0xFFFF)
-	{
-		return &prg_rom[address - 0xC000];
+		return get_pointer_at_prg_address(address);
 	}
 	else
 	{
@@ -195,9 +171,9 @@ void test_zero_flag(unsigned char byte)
 }
 
 // Sets the carry flag if a + b would carry, clears it otherwise.
-void test_carry_addition(unsigned char operand_a, unsigned char operand_b)
+void test_carry_addition(unsigned char operand_a, unsigned char operand_b, unsigned char carry_bit)
 {
-	if ((0xFF - operand_a) < operand_b)
+	if ((operand_a + operand_b + carry_bit) > 0xFF)
 	{
 		status_flags = status_flags | 0b00000001;
 	}
@@ -221,7 +197,7 @@ void test_carry_subtraction(unsigned char operand_a, unsigned char operand_b)
 }
 
 // Sets the overflow flag if the operands, treated as signed bytes, will overflow when added. Clears it otherwise.
-void test_overflow_addition(unsigned char operand_a, unsigned char operand_b)
+void test_overflow_addition(unsigned char operand_a, unsigned char operand_b, unsigned char carry_bit)
 {
 	// If the operands have opposite signs, they can't overflow.
 	if ((operand_a >= 0x80) != (operand_b >= 0x80))
@@ -230,19 +206,15 @@ void test_overflow_addition(unsigned char operand_a, unsigned char operand_b)
 	}
 	else
 	{
-		if (operand_a >= 0x80)
+		unsigned char result = operand_a + operand_b + carry_bit;
+		// If A and B have the same sign, there's an overflow if the sum has a different sign.
+		if ((result >= 0x80) == (operand_a >= 0x80))
 		{
-			operand_a = (~operand_a) + 1;
-			operand_b = (~operand_b) + 1;
-		}
-		
-		if ((operand_a + operand_b) >= 0x80)
-		{
-			status_flags = status_flags | 0b01000000;
+			status_flags = status_flags & 0b10111111;
 		}
 		else
 		{
-			status_flags = status_flags & 0b10111111;
+			status_flags = status_flags | 0b01000000;
 		}
 	}
 }
@@ -309,12 +281,12 @@ unsigned int branch_on_status_flags(unsigned char mask, unsigned char value)
 // Adds the data byte to the accumulator. Works as both signed or unsigned addition.
 void add_with_carry(unsigned char data)
 {
+	unsigned char carry_bit = status_flags & 0b1;
 	// Carry bit is for unsigned addition, so we should test signed overflow before adding it.
-	test_overflow_addition(accumulator, data);
+	test_overflow_addition(accumulator, data, carry_bit);
+	test_carry_addition(accumulator, data, carry_bit);
 	// The carry bit is added to the data byte. Normally it should start cleared for addition.
-	data += status_flags & 0b1;
-	test_carry_addition(accumulator, data);
-	accumulator += data;
+	accumulator += data + carry_bit;
 	test_negative_flag(accumulator);
 	test_zero_flag(accumulator);
 }
@@ -322,10 +294,10 @@ void add_with_carry(unsigned char data)
 // Subtracts the data byte from the accumulator. Works by taking the two's complement of the data byte and adding it.
 void subtract_with_carry(unsigned char data)
 {
-	test_overflow_addition(accumulator, (~data) + 1);
-	data = (~data) + (status_flags & 0b1);
-	test_carry_addition(accumulator, data);
-	accumulator += data;
+	unsigned char carry_bit = status_flags & 0b1;
+	test_overflow_addition(accumulator, ~data, carry_bit);
+	test_carry_addition(accumulator, ~data, carry_bit);
+	accumulator += (~data) + carry_bit;
 	test_negative_flag(accumulator);
 	test_zero_flag(accumulator);
 }
@@ -419,6 +391,15 @@ unsigned char pull_from_stack()
 	return stack_top_byte;
 }
 
+void stack_dump()
+{
+	printf("STACK DUMP\n");
+	for (int i = 0x01FF; i > (STACK_PAGE + stack_pointer); i--)
+	{
+		printf("%04X: %02X\n", i, cpu_ram[i]);
+	}
+}
+
 // Carries out whatever instruction the opcode represents.
 // Returns the number of cycles spent on the instruction.
 // Addressing mode cheat sheet:
@@ -432,6 +413,8 @@ unsigned char pull_from_stack()
 // Indirect,Y: Written as ($00),Y. Works like a zero page indirect, but after it accesses the address at the pointer, it adds the y register.
 unsigned int run_opcode(unsigned char opcode)
 {
+	//printf("%04X: %02X\n", program_counter, opcode);
+	
 	unsigned int cycles = 0;
 	
 	switch(opcode)
@@ -439,8 +422,26 @@ unsigned int run_opcode(unsigned char opcode)
 		// NOP: Does nothing.
 		// Implied NOP. Hex: $EA  Len: 1  Time: 2
 		case 0xEA:
+		// Unofficial NOPs.
+		case 0x1A:
+		case 0x3A:
+		case 0x5A:
+		case 0x7A:
+		case 0xDA:
+		case 0xFA:
 		{
 			program_counter++;
+			cycles = 2;
+			break;
+		}
+		// Unofficial NOPs that skip over the next address, incrementing the program counter by 2.
+		case 0x80:
+		case 0x82:
+		case 0x89:
+		case 0xC2:
+		case 0xE2:
+		{
+			program_counter += 2;
 			cycles = 2;
 			break;
 		}
@@ -517,6 +518,7 @@ unsigned int run_opcode(unsigned char opcode)
 			break;
 		}
 		// Indirect JMP. Hex: $6C  Len: 3  Time: 5
+		// Unlike other forms of indirect addressing modes, an absolute address is used instead of a zero page address.
 		case 0x6C:
 		{
 			unsigned char low_byte = *get_pointer_at_cpu_address(program_counter + 1, READ);
@@ -905,6 +907,8 @@ unsigned int run_opcode(unsigned char opcode)
 		// Immediate SBC. Hex: $E9  Len: 2  Time: 2
 		// Affects flags S, V, Z, and C.
 		case 0xE9:
+		// Unofficial SBC.
+		case 0xEB:
 		{
 			unsigned int address = immediate_address();
 			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
@@ -1077,6 +1081,59 @@ unsigned int run_opcode(unsigned char opcode)
 			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
 			bitwise_and(load_byte);
 			program_counter += 2;
+			break;
+		}
+		// Unofficial opcode ANC. Performs an immediate AND, then copies flag S into flag C.
+		// Hex: $0B or $2B  Len: 2  Time: 2
+		// Affects flags S, Z, and C.
+		case 0x0B:
+		case 0x2B:
+		{
+			unsigned int address = immediate_address();
+			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			bitwise_and(load_byte);
+			if ((status_flags & 0b10000000) == 0b10000000)
+			{
+				status_flags = status_flags | 0b00000001;
+			}
+			else
+			{
+				status_flags = status_flags & 0b11111110;
+			}
+			program_counter += 2;
+			cycles = 2;
+			break;
+		}
+		// Unofficial opcode ALR. Performs an immediate AND, then an accumulator logical shift right.
+		// Hex: $4B  Len: 2  Time: 2
+		// Affects flags S, Z, and C.
+		case 0x4B:
+		{
+			unsigned int address = immediate_address();
+			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			bitwise_and(load_byte);
+			accumulator = logical_shift_right(accumulator);
+			program_counter += 2;
+			cycles = 2;
+			break;
+		}
+		// Unofficial opcode ARR. Performs an immediate AND, then an accumulator roll right.
+		// Sets flag C to bit 6, sets flag V to bit 6 xor bit 5.
+		// Hex: $6B  Len: 2  Time: 2
+		case 0x6B:
+		{
+			// TODO
+			program_counter += 2;
+			cycles = 2;
+			break;
+		}
+		// Unofficial opcode AXS.
+		// Hex: $CB  Len: 2  Time: 2
+		case 0xCB:
+		{
+			// TODO
+			program_counter += 2;
+			cycles = 2;
 			break;
 		}
 		// ORA: Performs bitwise OR with the accumulator.
@@ -1740,6 +1797,15 @@ unsigned int run_opcode(unsigned char opcode)
 			program_counter += 2;
 			break;
 		}
+		// Unofficial opcode LAX.
+		// Immediate LAX. Hex: $AB  Len: 2  Time: Unknown, guessing 2?
+		case 0xAB:
+		{
+			// TODO
+			program_counter += 2;
+			cycles = 2;
+			break;
+		}
 		// LDX: Loads a byte into the X register.
 		// Immediate LDX. Hex: $A2  Len: 2  Time: 2
 		// Affects flags S and Z.
@@ -2031,7 +2097,7 @@ unsigned int run_opcode(unsigned char opcode)
 		// Implied PHP. Hex: $08  Len: 1  Time: 3
 		case 0x08:
 		{
-			push_to_stack(status_flags);
+			push_to_stack(status_flags | 0b00110000);
 			program_counter++;
 			cycles = 3;
 			break;
@@ -2096,7 +2162,6 @@ void cpu_init()
 	apu_status = 0;
 	
 	cpu_ram = malloc(sizeof(char) * KB * 2);
-	prg_ram = malloc(sizeof(char) * KB * 8);
 	
 	// On init, JMP to the address at $FFFC.
 	program_counter = 0xFFFB;

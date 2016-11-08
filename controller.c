@@ -16,21 +16,6 @@ unsigned char controller_2_data;
 unsigned char controller_1_pending_write;
 unsigned char controller_2_pending_write;
 
-void controller_init()
-{
-	controller_1_bus = 0;
-	controller_2_bus = 0;
-	
-	controller_1_shift = 0;
-	controller_2_shift = 0;
-	
-	controller_1_data = 0;
-	controller_2_data = 0;
-	
-	controller_1_pending_write = 0;
-	controller_2_pending_write = 0;
-}
-
 void controller_tick()
 {
 	if (controller_1_pending_write)
@@ -99,4 +84,19 @@ unsigned char* read_controller_state(unsigned int address)
 	printf("Controller access error: attempted to access nonexistent controller register %04X\n", address);
 	exit_emulator();
 	return NULL;
+}
+
+void controller_init()
+{
+	controller_1_bus = 0;
+	controller_2_bus = 0;
+	
+	controller_1_shift = 0;
+	controller_2_shift = 0;
+	
+	controller_1_data = 0;
+	controller_2_data = 0;
+	
+	controller_1_pending_write = 0;
+	controller_2_pending_write = 0;
 }

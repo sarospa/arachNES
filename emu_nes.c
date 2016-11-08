@@ -4,19 +4,13 @@
 #include "nes_cpu.h"
 #include "nes_ppu.h"
 #include "controller.h"
+#include "cartridge.h"
 
 #define RENDER 1
 
 #if RENDER
 #include <SDL.h>
-#endif
 
-#ifdef DEBUG
-const int DEBUG_LIMIT = 100;
-int debug_counter;
-#endif
-
-#if RENDER
 union SDL_Event event;
 SDL_Rect rect;
 SDL_Renderer *renderer;
@@ -27,24 +21,23 @@ Uint8 *base;
 int pitch;
 #endif
 
+struct Color
+{
+	unsigned char red;
+	unsigned char green;
+	unsigned char blue;
+};
+
 const int KB = 1024;
-const int PRG_ROM_PAGE = 1024 * 16;
-const int CHR_ROM_PAGE = 1024 * 8;
 const int STACK_PAGE = 0x100;
 
-unsigned char* chr_rom;
-unsigned char* prg_rom;
-
-unsigned int chr_rom_size;
-
 SDL_GameController* pad;
+struct Color* palette;
 
 // TODO LIST
-// Nametable mirroring
 // Mappers
 // OAM (sprites)
 // Sound
-// Palettes
 // Scrolling
 // Most of PPUCTRL, PPUMASK
 void exit_emulator()
@@ -58,32 +51,6 @@ void exit_emulator()
 
 int main(int argc, char *argv[])
 {
-	#ifdef DEBUG
-	debug_counter = 0;
-	#endif
-	
-	FILE* rom = fopen(argv[1], "rb");
-	fseek(rom, SEEK_SET, 0);
-	unsigned char header[16];
-	fread(header, 1, 16, rom);
-	
-	unsigned char prg_pages = header[4];
-	unsigned int prg_rom_size = prg_pages * PRG_ROM_PAGE;
-	prg_rom = malloc(sizeof(char) * prg_rom_size);
-	
-	unsigned char chr_pages = header[5];
-	chr_rom_size = chr_pages * CHR_ROM_PAGE;
-	chr_rom = malloc(sizeof(char) * chr_rom_size);
-	
-	fread(prg_rom, 1, prg_rom_size, rom);
-	fread(chr_rom, 1, chr_rom_size, rom);
-	
-	fclose(rom);
-	
-	cpu_init();
-	ppu_init();
-	controller_init();
-	
 	#if RENDER
 	const unsigned int TEXTURE_WIDTH = 256;
 	const unsigned int TEXTURE_HEIGHT = 240;
@@ -104,11 +71,40 @@ int main(int argc, char *argv[])
 	{
 		pad = SDL_GameControllerOpen(0);
 		char* mapping = SDL_GameControllerMapping(pad);
-		printf("%s\n", mapping);
 	}
+	
+	FILE* rom = fopen(argv[1], "rb");
+	fseek(rom, SEEK_SET, 0);
+	unsigned char header[16];
+	fread(header, 1, 16, rom);
+	
+	unsigned char prg_pages = header[4];
+	unsigned char chr_pages = header[5];
+	unsigned char mapper = ((header[6] >> 4) & 0xF) | (header[7] & 0xF0);
+	unsigned char mirroring = header[6] & 0b1;
+	
+	cartridge_init(mapper, prg_pages, chr_pages, mirroring, rom);
+	ppu_init();
+	controller_init();
+	cpu_init();
+	
+	fclose(rom);
+	
+	palette = malloc(sizeof(struct Color) * 64);
+	
+	FILE* paletteData = fopen("palettes\\ntscpalette.pal", "rb");
+	fseek(paletteData, SEEK_SET, 0);
+	fread(palette, sizeof(struct Color), 64, paletteData);
+	fclose(paletteData);
+	
+	unsigned int currentFrame = SDL_GetTicks();
+	unsigned int nextFrame;
+	unsigned int now;
 	
 	while(1)
 	{
+		nextFrame = currentFrame + 17;
+		
 		#if RENDER
 		if (x == 0)
 		{
@@ -131,9 +127,11 @@ int main(int argc, char *argv[])
 				#if RENDER
 				//printf("Rendering pixel %d at y position %d, x position %d\n", render_pixel, y, x);
 				base = ((Uint8 *)pixels) + (4 * (y * TEXTURE_WIDTH + x));
-                base[0] = 85 * render_pixel;
-                base[1] = 85 * render_pixel;
-                base[2] = 85 * render_pixel;
+				struct Color pixel_data = palette[render_pixel];
+				
+                base[0] = pixel_data.blue;
+                base[1] = pixel_data.green;
+                base[2] = pixel_data.red;
 				base[3] = 0;
 				#endif
 				
@@ -356,6 +354,16 @@ int main(int argc, char *argv[])
 							}
 							break;
 						}
+					}
+					now = SDL_GetTicks();
+					if (now < nextFrame)
+					{
+						SDL_Delay(nextFrame - now);
+						currentFrame = nextFrame;
+					}
+					else
+					{
+						currentFrame = now;
 					}
 					#endif
 				}

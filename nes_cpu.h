@@ -7,8 +7,6 @@ extern const int DEBUG_LIMIT;
 #endif
 
 extern const int KB;
-extern const int PRG_ROM_PAGE;
-extern const int CHR_ROM_PAGE;
 extern const int STACK_PAGE;
 
 extern unsigned const char WRITE;
@@ -46,5 +44,7 @@ void exit_emulator();
 void cpu_init();
 unsigned int run_opcode(unsigned char opcode);
 unsigned char* get_pointer_at_cpu_address(unsigned int address, unsigned char write);
+
+void stack_dump();
 
 #endif
