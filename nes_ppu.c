@@ -332,7 +332,7 @@ void evaluate_sprites()
 	{
 		secondary_oam[sec_oam_count * 4] = oam[i * 4];
 		// If the sprite falls on the scanline, load it into the secondary OAM for rendering.
-		if ((secondary_oam[sec_oam_count * 4] <= scanline) && ((secondary_oam[sec_oam_count * 4] + 0x8) > scanline))
+		if ((secondary_oam[sec_oam_count * 4] <= scanline) && ((secondary_oam[sec_oam_count * 4] + 8U) > scanline))
 		{
 			secondary_oam[(sec_oam_count * 4) + 1] = oam[(i * 4) + 1];
 			secondary_oam[(sec_oam_count * 4) + 2] = oam[(i * 4) + 2];

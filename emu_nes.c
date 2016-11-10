@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <time.h>
 #include "nes_cpu.h"
 #include "nes_ppu.h"
 #include "controller.h"
@@ -99,13 +100,10 @@ int main(int argc, char *argv[])
 	fclose(paletteData);
 	
 	unsigned int currentFrame = SDL_GetTicks();
-	unsigned int nextFrame;
-	unsigned int now;
+	unsigned int nextFrame = currentFrame + 16;
 	
 	while(1)
 	{
-		nextFrame = currentFrame + 17;
-		
 		#if RENDER
 		if (x == 0)
 		{
@@ -150,222 +148,221 @@ int main(int argc, char *argv[])
 					SDL_UnlockTexture(texture);
 					SDL_RenderCopy(renderer, texture, NULL, NULL);
 					SDL_RenderPresent(renderer);
-					SDL_PollEvent(&event);
-					switch(event.type)
+					while (SDL_PollEvent(&event))
 					{
-						case SDL_QUIT:
+						switch(event.type)
 						{
-							printf("Quitting.\n");
-							exit_emulator();
-							break;
-						}
-						case SDL_CONTROLLERBUTTONDOWN:
-						{
-							switch(event.cbutton.button)
+							case SDL_QUIT:
 							{
-								case SDL_CONTROLLER_BUTTON_A:
-								{
-									controller_1_data = controller_1_data | 0b00000001;
-									break;
-								}
-								case SDL_CONTROLLER_BUTTON_B:
-								{
-									controller_1_data = controller_1_data | 0b00000010;
-									break;
-								}
-								case SDL_CONTROLLER_BUTTON_BACK:
-								{
-									controller_1_data = controller_1_data | 0b00000100;
-									break;
-								}
-								case SDL_CONTROLLER_BUTTON_START:
-								{
-									controller_1_data = controller_1_data | 0b00001000;
-									break;
-								}
-								case SDL_CONTROLLER_BUTTON_DPAD_UP:
-								{
-									controller_1_data = controller_1_data | 0b00010000;
-									break;
-								}
-								case SDL_CONTROLLER_BUTTON_DPAD_DOWN:
-								{
-									controller_1_data = controller_1_data | 0b00100000;
-									break;
-								}
-								case SDL_CONTROLLER_BUTTON_DPAD_LEFT:
-								{
-									controller_1_data = controller_1_data | 0b01000000;
-									break;
-								}
-								case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:
-								{
-									controller_1_data = controller_1_data | 0b10000000;
-									break;
-								}
+								printf("Quitting.\n");
+								exit_emulator();
+								break;
 							}
-							break;
-						}
-						case SDL_CONTROLLERBUTTONUP:
-						{
-							switch(event.cbutton.button)
+							case SDL_CONTROLLERBUTTONDOWN:
 							{
-								case SDL_CONTROLLER_BUTTON_A:
+								switch(event.cbutton.button)
 								{
-									controller_1_data = controller_1_data & 0b11111110;
-									break;
-								}
-								case SDL_CONTROLLER_BUTTON_B:
-								{
-									controller_1_data = controller_1_data & 0b11111101;
-									break;
-								}
-								case SDL_CONTROLLER_BUTTON_BACK:
-								{
-									controller_1_data = controller_1_data & 0b11111011;
-									break;
-								}
-								case SDL_CONTROLLER_BUTTON_START:
-								{
-									controller_1_data = controller_1_data & 0b11110111;
-									break;
-								}
-								case SDL_CONTROLLER_BUTTON_DPAD_UP:
-								{
-									controller_1_data = controller_1_data & 0b11101111;
-									break;
-								}
-								case SDL_CONTROLLER_BUTTON_DPAD_DOWN:
-								{
-									controller_1_data = controller_1_data & 0b11011111;
-									break;
-								}
-								case SDL_CONTROLLER_BUTTON_DPAD_LEFT:
-								{
-									controller_1_data = controller_1_data & 0b10111111;
-									break;
-								}
-								case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:
-								{
-									controller_1_data = controller_1_data & 0b01111111;
-									break;
-								}
-							}
-							break;
-						}
-						case SDL_KEYDOWN:
-						{
-							if (!event.key.repeat)
-							{
-								switch(event.key.keysym.scancode)
-								{
-									case SDL_SCANCODE_Z:
+									case SDL_CONTROLLER_BUTTON_A:
 									{
 										controller_1_data = controller_1_data | 0b00000001;
 										break;
 									}
-									case SDL_SCANCODE_X:
+									case SDL_CONTROLLER_BUTTON_B:
 									{
 										controller_1_data = controller_1_data | 0b00000010;
 										break;
 									}
-									case SDL_SCANCODE_RSHIFT:
-									case SDL_SCANCODE_LSHIFT:
+									case SDL_CONTROLLER_BUTTON_BACK:
 									{
 										controller_1_data = controller_1_data | 0b00000100;
 										break;
 									}
-									case SDL_SCANCODE_RETURN:
+									case SDL_CONTROLLER_BUTTON_START:
 									{
 										controller_1_data = controller_1_data | 0b00001000;
 										break;
 									}
-									case SDL_SCANCODE_UP:
+									case SDL_CONTROLLER_BUTTON_DPAD_UP:
 									{
 										controller_1_data = controller_1_data | 0b00010000;
 										break;
 									}
-									case SDL_SCANCODE_DOWN:
+									case SDL_CONTROLLER_BUTTON_DPAD_DOWN:
 									{
 										controller_1_data = controller_1_data | 0b00100000;
 										break;
 									}
-									case SDL_SCANCODE_LEFT:
+									case SDL_CONTROLLER_BUTTON_DPAD_LEFT:
 									{
 										controller_1_data = controller_1_data | 0b01000000;
 										break;
 									}
-									case SDL_SCANCODE_RIGHT:
+									case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:
 									{
 										controller_1_data = controller_1_data | 0b10000000;
 										break;
 									}
 								}
+								break;
 							}
-							break;
-						}
-						case SDL_KEYUP:
-						{
-							if (!event.key.repeat)
+							case SDL_CONTROLLERBUTTONUP:
 							{
-								switch(event.key.keysym.scancode)
+								switch(event.cbutton.button)
 								{
-									case SDL_SCANCODE_Z:
+									case SDL_CONTROLLER_BUTTON_A:
 									{
 										controller_1_data = controller_1_data & 0b11111110;
 										break;
 									}
-									case SDL_SCANCODE_X:
+									case SDL_CONTROLLER_BUTTON_B:
 									{
 										controller_1_data = controller_1_data & 0b11111101;
 										break;
 									}
-									case SDL_SCANCODE_RSHIFT:
-									case SDL_SCANCODE_LSHIFT:
+									case SDL_CONTROLLER_BUTTON_BACK:
 									{
 										controller_1_data = controller_1_data & 0b11111011;
 										break;
 									}
-									case SDL_SCANCODE_RETURN:
+									case SDL_CONTROLLER_BUTTON_START:
 									{
 										controller_1_data = controller_1_data & 0b11110111;
 										break;
 									}
-									case SDL_SCANCODE_UP:
+									case SDL_CONTROLLER_BUTTON_DPAD_UP:
 									{
 										controller_1_data = controller_1_data & 0b11101111;
 										break;
 									}
-									case SDL_SCANCODE_DOWN:
+									case SDL_CONTROLLER_BUTTON_DPAD_DOWN:
 									{
 										controller_1_data = controller_1_data & 0b11011111;
 										break;
 									}
-									case SDL_SCANCODE_LEFT:
+									case SDL_CONTROLLER_BUTTON_DPAD_LEFT:
 									{
 										controller_1_data = controller_1_data & 0b10111111;
 										break;
 									}
-									case SDL_SCANCODE_RIGHT:
+									case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:
 									{
 										controller_1_data = controller_1_data & 0b01111111;
 										break;
 									}
 								}
+								break;
 							}
-							break;
+							case SDL_KEYDOWN:
+							{
+								if (!event.key.repeat)
+								{
+									switch(event.key.keysym.scancode)
+									{
+										case SDL_SCANCODE_Z:
+										{
+											controller_1_data = controller_1_data | 0b00000001;
+											break;
+										}
+										case SDL_SCANCODE_X:
+										{
+											controller_1_data = controller_1_data | 0b00000010;
+											break;
+										}
+										case SDL_SCANCODE_RSHIFT:
+										case SDL_SCANCODE_LSHIFT:
+										{
+											controller_1_data = controller_1_data | 0b00000100;
+											break;
+										}
+										case SDL_SCANCODE_RETURN:
+										{
+											controller_1_data = controller_1_data | 0b00001000;
+											break;
+										}
+										case SDL_SCANCODE_UP:
+										{
+											controller_1_data = controller_1_data | 0b00010000;
+											break;
+										}
+										case SDL_SCANCODE_DOWN:
+										{
+											controller_1_data = controller_1_data | 0b00100000;
+											break;
+										}
+										case SDL_SCANCODE_LEFT:
+										{
+											controller_1_data = controller_1_data | 0b01000000;
+											break;
+										}
+										case SDL_SCANCODE_RIGHT:
+										{
+											controller_1_data = controller_1_data | 0b10000000;
+											break;
+										}
+									}
+								}
+								break;
+							}
+							case SDL_KEYUP:
+							{
+								if (!event.key.repeat)
+								{
+									switch(event.key.keysym.scancode)
+									{
+										case SDL_SCANCODE_Z:
+										{
+											controller_1_data = controller_1_data & 0b11111110;
+											break;
+										}
+										case SDL_SCANCODE_X:
+										{
+											controller_1_data = controller_1_data & 0b11111101;
+											break;
+										}
+										case SDL_SCANCODE_RSHIFT:
+										case SDL_SCANCODE_LSHIFT:
+										{
+											controller_1_data = controller_1_data & 0b11111011;
+											break;
+										}
+										case SDL_SCANCODE_RETURN:
+										{
+											controller_1_data = controller_1_data & 0b11110111;
+											break;
+										}
+										case SDL_SCANCODE_UP:
+										{
+											controller_1_data = controller_1_data & 0b11101111;
+											break;
+										}
+										case SDL_SCANCODE_DOWN:
+										{
+											controller_1_data = controller_1_data & 0b11011111;
+											break;
+										}
+										case SDL_SCANCODE_LEFT:
+										{
+											controller_1_data = controller_1_data & 0b10111111;
+											break;
+										}
+										case SDL_SCANCODE_RIGHT:
+										{
+											controller_1_data = controller_1_data & 0b01111111;
+											break;
+										}
+									}
+								}
+								break;
+							}
 						}
 					}
-					now = SDL_GetTicks();
-					if (now < nextFrame)
+					currentFrame = SDL_GetTicks();
+					if (currentFrame < nextFrame)
 					{
-						SDL_Delay(nextFrame - now);
-						currentFrame = nextFrame;
+						SDL_Delay(nextFrame - currentFrame);
 					}
-					else
-					{
-						currentFrame = now;
-					}
+					currentFrame = SDL_GetTicks();
+					nextFrame = currentFrame + 16;
 					#endif
 				}
 			}
