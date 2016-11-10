@@ -420,8 +420,6 @@ void stack_dump()
 // Indirect,Y: Written as ($00),Y. Works like a zero page indirect, but after it accesses the address at the pointer, it adds the y register.
 unsigned int run_opcode(unsigned char opcode)
 {
-	//printf("%04X: %02X\n", program_counter, opcode);
-	
 	unsigned int cycles = 0;
 	
 	switch(opcode)

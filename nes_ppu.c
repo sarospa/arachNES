@@ -69,7 +69,7 @@ unsigned char* get_pointer_at_ppu_address(unsigned int address)
 	else if (address >= 0x3F00 && address <= 0x3FFF)
 	{
 		// Handle mirroring of 0x3F00 through 0x3F1F.
-		return &palette_ram[address % 0x0020];
+		return &palette_ram[address & 0x1F];
 	}
 	else
 	{
@@ -261,6 +261,10 @@ void ppu_init()
 		ppu_ram[i] = 0;
 	}
 	palette_ram = malloc(sizeof(char) * 0x20);
+	for (int i = 0; i < 0x20; i++)
+	{
+		palette_ram[i] = 0;
+	}
 	oam = malloc(sizeof(char) * 0x100);
 	secondary_oam = malloc(sizeof(char) * 0x40);
 	sprite_bitmaps_low = malloc(sizeof(char) * 0x8);
@@ -273,13 +277,13 @@ void ppu_init()
 void increment_vram_horz()
 {
 	unsigned char tile_x = ((vram_address + 1) & 0b11111);
-	vram_address = (vram_address & 0b1111111111100000) | tile_x;
+	vram_address = (vram_address & 0b111001111100000) | ((ppu_control & 0b11) << 10) | tile_x;
 }
 
 // Overwrite VRAM's X-scroll bits with the ones from temp VRAM.
 void reset_vram_horz()
 {
-	vram_address = (vram_address & 0b1111111111100000) | (vram_temp & 0b11111);
+	vram_address = (vram_address & 0b111001111100000) | (vram_temp & 0b11111) | ((ppu_control & 0b11) << 10);
 }
 
 // Increments the fine Y-scroll in VRAM.
@@ -420,7 +424,7 @@ unsigned char ppu_tick()
 		{
 			if ((scan_pixel > 0) && (scan_pixel <= 256))
 			{
-				pixel_data = 0;
+				pixel_data = 0x0F;
 			}
 		}
 		else

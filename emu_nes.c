@@ -53,6 +53,8 @@ void exit_emulator()
 
 int main(int argc, char *argv[])
 {
+	setbuf(stdout, NULL);
+	
 	#if RENDER
 	const unsigned int TEXTURE_WIDTH = 256;
 	const unsigned int TEXTURE_HEIGHT = 240;
@@ -124,7 +126,6 @@ int main(int argc, char *argv[])
 			if (render_pixel != 255)
 			{
 				#if RENDER
-				//printf("Rendering pixel %d at y position %d, x position %d\n", render_pixel, y, x);
 				base = ((Uint8 *)pixels) + (4 * (y * TEXTURE_WIDTH + x));
 				struct Color pixel_data = palette[render_pixel];
 				
