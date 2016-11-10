@@ -96,7 +96,7 @@ int main(int argc, char *argv[])
 	
 	palette = malloc(sizeof(struct Color) * 64);
 	
-	FILE* paletteData = fopen("palettes\\ntscpalette.pal", "rb");
+	FILE* paletteData = fopen("palettes/ntscpalette.pal", "rb");
 	fseek(paletteData, SEEK_SET, 0);
 	fread(palette, sizeof(struct Color), 64, paletteData);
 	fclose(paletteData);
