@@ -2,6 +2,7 @@
 #include<string.h>
 #include<stdlib.h>
 #include "nes_cpu.h"
+#include "nes_apu.h"
 #include "nes_ppu.h"
 #include "controller.h"
 #include "cartridge.h"
@@ -17,7 +18,6 @@ unsigned int program_counter;
 unsigned char stack_pointer;
 unsigned char status_flags;
 
-unsigned char apu_status;
 unsigned char oam_dma_active;
 unsigned char oam_dma_page;
 
@@ -48,14 +48,9 @@ unsigned char* get_pointer_at_cpu_address(unsigned int address, unsigned char ac
 		oam_dma_active = 1;
 		return &oam_dma_page;
 	}
-	// APU status
-	else if (address == 0x4015)
-	{
-		return &apu_status;
-	}
-	// Controller ports. 0x4017 is weird because it's partly controller part and partly audio stuff?
+	// Player 1 controller port.
 	// Will have to figure that out eventually.
-	else if (address == 0x4016 || address == 0x4017)
+	else if (address == 0x4016)
 	{
 		if (access_type == WRITE)
 		{
@@ -66,9 +61,25 @@ unsigned char* get_pointer_at_cpu_address(unsigned int address, unsigned char ac
 			return read_controller_state(address);
 		}
 	}
-	else if (address >= 0x4000 && address <= 0x401F)
+	// 0x4017 is weird because it's partly controller port 2 and partly APU frame counter.
+	// I'm not using controller port 2 at the moment, so I'll figure this out later.
+	/*else if (address == 0x4017)
 	{
-		return &dummy;
+		if (access_type == WRITE)
+		{
+			
+		}
+	}*/
+	else if (address >= 0x4000 && address <= 0x4017)
+	{
+		if (access_type == WRITE)
+		{
+			return apu_write(address);
+		}
+		else
+		{
+			return apu_read(address);
+		}
 	}
 	else if (address >= 0x6000 && address <= 0xFFFF)
 	{
