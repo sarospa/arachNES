@@ -187,7 +187,6 @@ int main(int argc, char *argv[])
     const unsigned int WINDOW_HEIGHT = TEXTURE_HEIGHT * 2;
 	
 	SDL_Init(SDL_INIT_TIMER | SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_JOYSTICK | SDL_INIT_AUDIO);
-    //SDL_CreateWindowAndRenderer(WINDOW_WIDTH, WINDOW_HEIGHT, 0, &window, &renderer);
 	window = SDL_CreateWindow("arachNES Emulator", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WINDOW_WIDTH, WINDOW_HEIGHT, 0);
 	renderer = SDL_CreateRenderer(window, -1, 0);
 	SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
@@ -200,7 +199,6 @@ int main(int argc, char *argv[])
 	want.samples = audio_device_samples;
 	want.callback = audio_callback;
 	device = SDL_OpenAudioDevice(NULL, 0, &want, NULL, 0);
-	
 	target_samples_per_frame = (float)audio_frequency * (frame_millisecs / 1000.0f);
 	current_samples_per_frame = target_samples_per_frame;
 	samples_this_frame = 0;
@@ -418,10 +416,10 @@ int main(int argc, char *argv[])
 										case SDL_SCANCODE_RSHIFT:
 										case SDL_SCANCODE_LSHIFT:
 										{
-											printf("SPRITE PAGE DUMP\n");
-											for (int i = 0; i < 256; i++)
+											printf("ROM DUMP\n");
+											for (int i = 0; i < 0x1000; i++)
 											{
-												printf("%02X: %02X\n", i, *get_pointer_at_cpu_address(0x0200 + i, READ));
+												printf("%04X: %02X\n", i, *get_pointer_at_cpu_address(i, READ));
 											}
 											controller_1_data = controller_1_data | 0b00000100;
 											break;

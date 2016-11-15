@@ -21,6 +21,10 @@ unsigned char ppu_control;
 unsigned char ppu_mask;
 unsigned char ppu_status;
 unsigned char oam_address;
+// When the CPU reads PPUDATA, what it gets
+// is the contents of this buffer, which is only updated
+// after the read. Okay???
+unsigned char ppu_data_buffer;
 
 unsigned int register_accessed;
 
@@ -129,8 +133,37 @@ void notify_ppu(unsigned int ppu_register, unsigned char access_type)
 		// PPUDATA
 		case 0x2007:
 		{
-			ppu_bus = *get_pointer_at_ppu_address(vram_address); 
-			register_accessed = ppu_register;
+			if (access_type == READ)
+			{
+				// Reading PPUDATA works via an utterly bizarre scheme in which the data
+				// actually read is from a buffer that is updated with the latest value only
+				// after the read. Except for palettes, which are read directly, except
+				// the buffer is still updated, but with the nametable byte that /would/
+				// be there if the address wasn't a palette.
+				if (vram_address <= 0x3EFF)
+				{
+					ppu_bus = ppu_data_buffer;
+				}
+				else
+				{
+					ppu_bus = *get_pointer_at_ppu_address(vram_address);
+				}
+				ppu_data_buffer = *get_pointer_at_nametable_address(vram_address);
+				
+				// Check VRAM address increment flag
+				if ((ppu_control & 0b00000100) == 0b00000100)
+				{
+					vram_address += 32;
+				}
+				else
+				{
+					vram_address++;
+				}
+			}
+			else
+			{
+				register_accessed = ppu_register;
+			}
 			break;
 		}
 		default:
@@ -245,6 +278,7 @@ void ppu_init()
 	ppu_mask = 0;
 	ppu_status = 0;
 	oam_address = 0;
+	ppu_data_buffer = 0;
 	register_accessed = 0;
 	
 	write_toggle = 0;
