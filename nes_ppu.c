@@ -59,11 +59,11 @@ unsigned char reverse_byte(unsigned char byte)
    return byte;
 }
 
-unsigned char* get_pointer_at_ppu_address(unsigned int address)
+unsigned char* get_pointer_at_ppu_address(unsigned int address, unsigned char access_type)
 {
 	if (address <= 0x1FFF)
 	{
-		return get_pointer_at_chr_address(address);
+		return get_pointer_at_chr_address(address, access_type);
 	}
 	else if (address >= 0x2000 && address <= 0x3EFF)
 	{
@@ -83,7 +83,7 @@ unsigned char* get_pointer_at_ppu_address(unsigned int address)
 	}
 }
 
-unsigned char* get_pointer_at_attribute_table_address(int address)
+unsigned char* get_pointer_at_attribute_table_address(int address, unsigned char access_type)
 {
 	// This is a bit tricky. The VRAM address is structured like this:
 	// yyy NN YYYYY XXXXX
@@ -92,7 +92,7 @@ unsigned char* get_pointer_at_attribute_table_address(int address)
 	//     NN 1111 YYY XXX
 	// N for nametable select, Y for the high 3 bits of the coarse Y-scroll, X for the high 3 bits of the coarse X-scroll.
 	// We want to strip out yyy, keep NN, set the next 4 bits to 1, set the top 3 Y bits shifted down by 4, set the top 3 X bits shifted down by 2.
-	return get_pointer_at_ppu_address(0x23C0 | (address & 0b110000000000) | ((address >> 4) & 0b111000) | ((address >> 2) & 0b111));
+	return get_pointer_at_ppu_address(0x23C0 | (address & 0b110000000000) | ((address >> 4) & 0b111000) | ((address >> 2) & 0b111), access_type);
 }
 
 // Notifies the PPU that the CPU accessed the PPU bus.
@@ -107,10 +107,13 @@ void notify_ppu(unsigned int ppu_register, unsigned char access_type)
 		// PPUSTATUS
 		case 0x2002:
 		{
-			write_toggle = 0;
-			ppu_bus = ppu_status;
-			// Clear the vblank flag after PPUSTATUS read.
-			ppu_status = ppu_status & 0b01111111;
+			if (access_type == READ)
+			{
+				write_toggle = 0;
+				ppu_bus = ppu_status;
+				// Clear the vblank flag after PPUSTATUS read.
+				ppu_status = ppu_status & 0b01111111;
+			}
 			break;
 		}
 		// OAMADDR
@@ -146,9 +149,9 @@ void notify_ppu(unsigned int ppu_register, unsigned char access_type)
 				}
 				else
 				{
-					ppu_bus = *get_pointer_at_ppu_address(vram_address);
+					ppu_bus = *get_pointer_at_ppu_address(vram_address, READ);
 				}
-				ppu_data_buffer = *get_pointer_at_nametable_address(vram_address);
+				ppu_data_buffer = *get_pointer_at_ppu_address(vram_address, READ);
 				
 				// Check VRAM address increment flag
 				if ((ppu_control & 0b00000100) == 0b00000100)
@@ -251,7 +254,7 @@ void notify_ppu_write(unsigned int ppu_register)
 		// PPUDATA
 		case 0x2007:
 		{
-			unsigned char* address_byte = get_pointer_at_ppu_address(vram_address);
+			unsigned char* address_byte = get_pointer_at_ppu_address(vram_address, WRITE);
 			*address_byte = ppu_bus;
 			// Check VRAM address increment flag
 			if ((ppu_control & 0b00000100) == 0b00000100)
@@ -289,8 +292,8 @@ void ppu_init()
 	
 	nmi_occurred = 0;
 	
-	ppu_ram = malloc(sizeof(char) * KB * 2);
-	for (int i = 0; i < (KB * 2); i++)
+	ppu_ram = malloc(sizeof(char) * 0x800);
+	for (int i = 0; i < 0x800; i++)
 	{
 		ppu_ram[i] = 0;
 	}
@@ -311,26 +314,40 @@ void ppu_init()
 void increment_vram_horz()
 {
 	unsigned char tile_x = ((vram_address + 1) & 0b11111);
-	vram_address = (vram_address & 0b111001111100000) | ((ppu_control & 0b11) << 10) | tile_x;
+	// Move to the next nametable when the scroll value wraps.
+	if (tile_x == 0)
+	{
+		vram_address = vram_address ^ 0b10000000000;
+	}
+	vram_address = (vram_address & 0b111111111100000) | tile_x;
 }
 
 // Overwrite VRAM's X-scroll bits with the ones from temp VRAM.
 void reset_vram_horz()
 {
-	vram_address = (vram_address & 0b111001111100000) | (vram_temp & 0b11111) | ((ppu_control & 0b11) << 10);
+	vram_address = (vram_address & 0b111101111100000) | (vram_temp & 0b11111) | ((ppu_control & 0b1) << 10);
 }
 
 // Increments the fine Y-scroll in VRAM.
 void increment_vram_vert()
 {
-	unsigned int scroll_y = (vram_address >> 12) + ((vram_address >> 2) & 0b11111000) + 1;
-	vram_address = (vram_address & 0b110000011111) | ((scroll_y << 12) & 0b111000000000000) | ((scroll_y << 2) & 0b1111100000); 
+	unsigned int scroll_y = ((vram_address >> 12) + ((vram_address >> 2) & 0b11111000) + 1) & 0b11111111;
+	// Move down one nametable when we hit the bottom of the screen.
+	// Note that this is not the bottom of the nametable, row 31, but row 29. Thus, we should check
+	// if the row hits 30 when wrapping, and set it to the top of the next nametable.
+	// Wrapping inside 'out of bounds' rows DOES NOT move to the next nametable.
+	if (scroll_y == 0b11110000)
+	{
+		vram_address = vram_address ^ 0b100000000000;
+		scroll_y = 0;
+	}
+	vram_address = (vram_address & 0b110000011111) | ((scroll_y << 12) & 0b111000000000000) | ((scroll_y << 2) & 0b1111100000);
 }
 
 // Overwrite VRAM's Y-scroll bits with the ones from temp VRAM.
 void reset_vram_vert()
 {
-	vram_address = (vram_address & 0b110000011111) | (vram_temp & 0b111001111100000);
+	vram_address = (vram_address & 0b10000011111) | (vram_temp & 0b111001111100000) | ((ppu_control & 0b10) << 10);
 }
 
 void load_render_registers()
@@ -345,10 +362,10 @@ void load_render_registers()
 	// It seems that the part stored in the nametable is RRRR CCCC, indicating the tile row and column.
 	unsigned int pattern_address = ((ppu_control & 0b10000) << 8) | (pattern_byte * 0b10000) | fine_y_scroll;
 	// Write the low byte from the pattern table to the low byte of the low bitmap register.
-	bitmap_register_low = (bitmap_register_low & 0xFF00) | *get_pointer_at_ppu_address(pattern_address);
+	bitmap_register_low = (bitmap_register_low & 0xFF00) | *get_pointer_at_ppu_address(pattern_address, READ);
 	// Write the high byte from the pattern table to the low byte of the high bitmap register.
-	bitmap_register_high = (bitmap_register_high & 0xFF00) | *get_pointer_at_ppu_address(pattern_address | 0b1000);
-	unsigned char attribute_byte = *get_pointer_at_attribute_table_address(vram_address & 0b111111111111);
+	bitmap_register_high = (bitmap_register_high & 0xFF00) | *get_pointer_at_ppu_address(pattern_address | 0b1000, READ);
+	unsigned char attribute_byte = *get_pointer_at_attribute_table_address(vram_address & 0b111111111111, READ);
 	unsigned char attribute_tile_select = ((vram_address >> 1) & 0b1) + ((vram_address >> 5) & 0b10);
 	palette_latch = (attribute_byte >> (attribute_tile_select * 2)) & 0b11;
 	
@@ -400,8 +417,8 @@ void load_sprites()
 		// TTT is the fine y offset. We get that from which scanline is being drawn.
 		// RRRR indicates row, and CCCC indicates column.
 		unsigned int pattern_address = ((ppu_control & 0b1000) << 9) | (tile_number << 4) | fine_y;
-		unsigned char sprite_bitmap_low = *get_pointer_at_ppu_address(pattern_address);
-		unsigned char sprite_bitmap_high = *get_pointer_at_ppu_address(pattern_address | 0b1000);
+		unsigned char sprite_bitmap_low = *get_pointer_at_ppu_address(pattern_address, READ);
+		unsigned char sprite_bitmap_high = *get_pointer_at_ppu_address(pattern_address | 0b1000, READ);
 		
 		if ((sprite_attribute_byte & 0b1000000) == 0b1000000)
 		{
@@ -424,6 +441,7 @@ unsigned char ppu_tick()
 	notify_ppu_write(register_accessed);
 	
 	unsigned char render_disable = (ppu_mask & 0b00011000) == 0;
+	unsigned char background_enable = (ppu_mask & 0b1000) == 0b1000;
 	
 	// pre-render scanline
 	if (scanline == 261)
@@ -476,10 +494,18 @@ unsigned char ppu_tick()
 				{
 					load_render_registers();
 				}
-				// Eventually we'll have to implement fine scrolling to select which bit we want to use.
-				// Right now, always selecting bit 15 for no scrolling.
-				unsigned char palette_address = ((bitmap_register_low >> 15) & 0b1) | ((bitmap_register_high >> 14) & 0b10) | ((palette_register_low >> 5) & 0b100) | ((palette_register_high >> 4) & 0b1000);
-				pixel_data = *get_pointer_at_ppu_address(0x3F00 + palette_address);
+				// It seems that fine x scroll selects bits in the opposite order of my implementation.
+				// I still don't understand exactly how the rendering pipeline works. But this should work fine.
+				unsigned char fixed_fine_x_scroll = 7 - fine_x_scroll;
+				unsigned char palette_address =
+					  ((bitmap_register_low >> (8 + fixed_fine_x_scroll)) & 0b1)
+					| ((bitmap_register_high >> (7 + fixed_fine_x_scroll)) & 0b10)
+					| (((palette_register_low >> fixed_fine_x_scroll) << 2) & 0b100)
+					| (((palette_register_high >> fixed_fine_x_scroll) << 3) & 0b1000);
+				if (background_enable)
+				{
+					pixel_data = *get_pointer_at_ppu_address(0x3F00 + palette_address, READ);
+				}
 				bitmap_register_low = (bitmap_register_low << 1) & 0xFFFF;
 				bitmap_register_high = (bitmap_register_high << 1) & 0xFFFF;
 				palette_register_low = ((palette_register_low << 1) & 0xFF) | (palette_latch & 0b1);
@@ -499,7 +525,7 @@ unsigned char ppu_tick()
 						if (sprite_palette > 0)
 						{
 							sprite_palette = sprite_palette | ((sprite_attributes[i] & 0b11) << 2);
-							pixel_data = *get_pointer_at_ppu_address(0x3F10 + sprite_palette);
+							pixel_data = *get_pointer_at_ppu_address(0x3F10 + sprite_palette, READ);
 						}
 						sprite_bitmaps_low[i] = (sprite_bitmaps_low[i] << 1) & 0xFF;
 						sprite_bitmaps_high[i] = (sprite_bitmaps_high[i] << 1) & 0xFF;
@@ -513,13 +539,23 @@ unsigned char ppu_tick()
 				// Evaluating sprites here for now, in preparation for the next scanline.
 				evaluate_sprites();
 			}
-			else if ((scan_pixel >= 320) && (scan_pixel <= 336))
+			else if (scan_pixel == 321)
 			{
-				// Load the first two tiles of the next scanline.
-				if ((scan_pixel % 8) == 1)
+				// Load the first tile of the next scanline.
+				load_render_registers();
+			}
+			else if (scan_pixel == 329)
+			{
+				// Shift the first tile to be rendered and load the second tile of the next scanline.
+				// This probably isn't how the NES really handles it, but it should work?
+				for (int i = 0; i < 8; i++)
 				{
-					load_render_registers();
+					bitmap_register_low = (bitmap_register_low << 1) & 0xFFFF;
+					bitmap_register_high = (bitmap_register_high << 1) & 0xFFFF;
+					palette_register_low = ((palette_register_low << 1) & 0xFF) | (palette_latch & 0b1);
+					palette_register_high = ((palette_register_high << 1) & 0xFF) | ((palette_latch & 0b10) >> 1);
 				}
+				load_render_registers();
 			}
 		}
 	}

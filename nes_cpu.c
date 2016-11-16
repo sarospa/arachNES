@@ -61,6 +61,10 @@ unsigned char* get_pointer_at_cpu_address(unsigned int address, unsigned char ac
 			return read_controller_state(address);
 		}
 	}
+	else if (address == 0x400D)
+	{
+		return &dummy;
+	}
 	// 0x4017 is weird because it's partly controller port 2 and partly APU frame counter.
 	// I'm not using controller port 2 at the moment, so I'll figure this out later.
 	/*else if (address == 0x4017)
@@ -2194,6 +2198,10 @@ void cpu_init()
 	oam_dma_active = 0;
 	
 	cpu_ram = malloc(sizeof(char) * KB * 2);
+	for (int i = 0; i < KB * 2; i++)
+	{
+		cpu_ram[i] = 0;
+	}
 	
 	// On init, JMP to the address at $FFFC.
 	program_counter = 0xFFFB;

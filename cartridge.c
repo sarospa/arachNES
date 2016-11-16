@@ -43,7 +43,7 @@ unsigned char* get_pointer_at_prg_address(unsigned int address)
 	}
 }
 
-unsigned char* get_pointer_at_chr_address(unsigned int address)
+unsigned char* get_pointer_at_chr_address(unsigned int address, unsigned char access_type)
 {
 	// Typically the pattern tables would be stored here.
 	if (address <= 0x1FFF)
@@ -54,6 +54,11 @@ unsigned char* get_pointer_at_chr_address(unsigned int address)
 		}
 		else
 		{
+			if (access_type == WRITE)
+			{
+				printf("Illegally attempting to write to CHR ROM at address %04X.\n", address);
+				exit_emulator();
+			}
 			return &chr_rom[address];
 		}
 	}

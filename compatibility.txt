@@ -6,12 +6,12 @@ PERFECT: Runs without any issues
 
 PLAYABLE: Runs with only minor glitches, can be played all the way through
 --------------------------------------------------------------------------
-Mario Bros
 Donkey Kong
+Galaxian
+Mario Bros
 
 RUNS: Can be played, but suffers from major glitches or crashing
 ----------------------------------------------------------------
-Galaxian
 
 BOOTS: Can be booted, but is unplayable
 ---------------------------------------

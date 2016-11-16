@@ -78,7 +78,6 @@ void audio_callback(void* userdata, Uint8* stream, int len)
 	{
 		if (audio_buffer_reader == audio_buffer_writer)
 		{
-			printf("Buffering silence.\n");
 			stream[i] = audio_buffer_last_value;
 		}
 		else
@@ -137,17 +136,12 @@ void push_audio()
 			{
 			audio_buffer[audio_buffer_writer] = (signed char)((roundf((sample_total / sample_size) * 1000) / 1000) * UCHAR_MAX);
 			audio_buffer_last_value = audio_buffer[audio_buffer_writer];
-			//printf("Buffering sample %d at %d\n", audio_buffer[audio_buffer_writer], audio_buffer_writer);
 			}
 			else
 			{
 				audio_buffer[audio_buffer_writer] = audio_buffer_last_value;
 			}
 			audio_buffer_writer = (audio_buffer_writer + 1) % audio_buffer_max;
-		}
-		else
-		{
-			printf("Audio buffer full.\n");
 		}
 	}
 	
@@ -416,11 +410,6 @@ int main(int argc, char *argv[])
 										case SDL_SCANCODE_RSHIFT:
 										case SDL_SCANCODE_LSHIFT:
 										{
-											printf("ROM DUMP\n");
-											for (int i = 0; i < 0x1000; i++)
-											{
-												printf("%04X: %02X\n", i, *get_pointer_at_cpu_address(i, READ));
-											}
 											controller_1_data = controller_1_data | 0b00000100;
 											break;
 										}
@@ -448,6 +437,31 @@ int main(int argc, char *argv[])
 										{
 											controller_1_data = controller_1_data | 0b10000000;
 											break;
+										}
+										// debug hotkeys
+										case SDL_SCANCODE_R:
+										{
+											printf("ROM DUMP\n");
+											for (int i = 0; i < 0x1000; i++)
+											{
+												printf("%04X: %02X\n", i, *get_pointer_at_cpu_address(i, READ));
+											}
+										}
+										case SDL_SCANCODE_N:
+										{
+											printf("NAMETABLE DUMP\n");
+											for (int i = 0x2000; i <= 0x2FFF; i++)
+											{
+												printf("%04X: %02X\n", i, *get_pointer_at_nametable_address(i));
+											}
+										}
+										case SDL_SCANCODE_P:
+										{
+											printf("PATTERN TABLE DUMP\n");
+											for (int i = 0; i <= 0x1FFF; i++)
+											{
+												printf("%04X: %02X\n", i, *get_pointer_at_chr_address(i, READ));
+											}
 										}
 									}
 								}
