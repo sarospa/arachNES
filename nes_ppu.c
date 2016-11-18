@@ -44,6 +44,7 @@ unsigned char* sprite_bitmaps_low;
 unsigned char* sprite_bitmaps_high;
 unsigned char* sprite_attributes;
 unsigned char* sprite_x_positions;
+unsigned char sprite_count;
 
 unsigned char pending_nmi;
 // Treated as two-bit shift registers to detect edges.
@@ -308,6 +309,7 @@ void ppu_init()
 	sprite_bitmaps_high = malloc(sizeof(char) * 0x8);
 	sprite_attributes = malloc(sizeof(char) * 0x8);
 	sprite_x_positions = malloc(sizeof(char) * 0x8);
+	sprite_count = 0;
 }
 
 // Increments the coarse X-scroll in VRAM.
@@ -382,17 +384,17 @@ void evaluate_sprites()
 	{
 		secondary_oam[i] = 0xFF;
 	}
-	unsigned char sec_oam_count = 0;
-	for (int i = 0; (i < 0x40) && (sec_oam_count < 0x8); i++)
+	sprite_count = 0;
+	for (int i = 0; (i < 0x40) && (sprite_count < 0x8); i++)
 	{
-		secondary_oam[sec_oam_count * 4] = oam[i * 4];
+		secondary_oam[sprite_count * 4] = oam[i * 4];
 		// If the sprite falls on the scanline, load it into the secondary OAM for rendering.
-		if ((secondary_oam[sec_oam_count * 4] <= scanline) && ((secondary_oam[sec_oam_count * 4] + 8U) > scanline))
+		if ((secondary_oam[sprite_count * 4] <= scanline) && ((secondary_oam[sprite_count * 4] + 8U) > scanline))
 		{
-			secondary_oam[(sec_oam_count * 4) + 1] = oam[(i * 4) + 1];
-			secondary_oam[(sec_oam_count * 4) + 2] = oam[(i * 4) + 2];
-			secondary_oam[(sec_oam_count * 4) + 3] = oam[(i * 4) + 3];
-			sec_oam_count++;
+			secondary_oam[(sprite_count * 4) + 1] = oam[(i * 4) + 1];
+			secondary_oam[(sprite_count * 4) + 2] = oam[(i * 4) + 2];
+			secondary_oam[(sprite_count * 4) + 3] = oam[(i * 4) + 3];
+			sprite_count++;
 		}
 	}
 }
@@ -442,6 +444,7 @@ unsigned char ppu_tick()
 	
 	unsigned char render_disable = (ppu_mask & 0b00011000) == 0;
 	unsigned char background_enable = (ppu_mask & 0b1000) == 0b1000;
+	unsigned char sprite_enable = (ppu_mask & 0b10000) == 0b10000;
 	
 	// pre-render scanline
 	if (scanline == 261)
@@ -489,6 +492,8 @@ unsigned char ppu_tick()
 			// Rendering cycles
 			else if ((scan_pixel > 0) && (scan_pixel <= 256))
 			{
+				// Default to black if nothing else gets rendered
+				pixel_data = 0x0F;
 				// Load the next tile every 8 cycles.
 				if (((scan_pixel % 8) == 1) && (scan_pixel > 1))
 				{
@@ -497,40 +502,54 @@ unsigned char ppu_tick()
 				// It seems that fine x scroll selects bits in the opposite order of my implementation.
 				// I still don't understand exactly how the rendering pipeline works. But this should work fine.
 				unsigned char fixed_fine_x_scroll = 7 - fine_x_scroll;
-				unsigned char palette_address =
+				unsigned char background_bitmap_palette =
 					  ((bitmap_register_low >> (8 + fixed_fine_x_scroll)) & 0b1)
-					| ((bitmap_register_high >> (7 + fixed_fine_x_scroll)) & 0b10)
+					| ((bitmap_register_high >> (7 + fixed_fine_x_scroll)) & 0b10);
+				unsigned char palette_address = background_bitmap_palette
 					| (((palette_register_low >> fixed_fine_x_scroll) << 2) & 0b100)
 					| (((palette_register_high >> fixed_fine_x_scroll) << 3) & 0b1000);
+				unsigned char background_pixel = *get_pointer_at_ppu_address(0x3F00 + palette_address, READ);
 				if (background_enable)
 				{
-					pixel_data = *get_pointer_at_ppu_address(0x3F00 + palette_address, READ);
+					pixel_data = background_pixel;
 				}
 				bitmap_register_low = (bitmap_register_low << 1) & 0xFFFF;
 				bitmap_register_high = (bitmap_register_high << 1) & 0xFFFF;
 				palette_register_low = ((palette_register_low << 1) & 0xFF) | (palette_latch & 0b1);
 				palette_register_high = ((palette_register_high << 1) & 0xFF) | ((palette_latch & 0b10) >> 1);
 				
-				// Evaluate in reverse order to make sure lower index sprites are drawn on top.
-				for (int i = 7; i >= 0; i--)
+				if (sprite_enable)
 				{
-					if (sprite_x_positions[i] > 0)
+					// Evaluate in reverse order to make sure lower index sprites are drawn on top.
+					for (int i = (sprite_count - 1); i >= 0; i--)
 					{
-						sprite_x_positions[i]--;
-					}
-					else
-					{
-						unsigned char sprite_palette = ((sprite_bitmaps_low[i] >> 7) & 0b1) | ((sprite_bitmaps_high[i] >> 6) & 0b10);
-						// Only load in sprite pixel if it's non-transparent.
-						if (sprite_palette > 0)
+						if (sprite_x_positions[i] > 0)
 						{
-							sprite_palette = sprite_palette | ((sprite_attributes[i] & 0b11) << 2);
-							pixel_data = *get_pointer_at_ppu_address(0x3F10 + sprite_palette, READ);
+							sprite_x_positions[i]--;
 						}
-						sprite_bitmaps_low[i] = (sprite_bitmaps_low[i] << 1) & 0xFF;
-						sprite_bitmaps_high[i] = (sprite_bitmaps_high[i] << 1) & 0xFF;
+						else
+						{
+							unsigned char sprite_priority = (sprite_attributes[i] >> 5) & 0b1;
+							unsigned char sprite_palette = ((sprite_bitmaps_low[i] >> 7) & 0b1) | ((sprite_bitmaps_high[i] >> 6) & 0b10);
+							// Only load in sprite pixel if it's non-transparent.
+							if (sprite_palette > 0)
+							{
+								if (background_enable && (background_bitmap_palette > 0) && (sprite_priority == 1))
+								{
+									pixel_data = background_pixel;
+								}
+								else
+								{
+									sprite_palette = sprite_palette | ((sprite_attributes[i] & 0b11) << 2);
+									pixel_data = *get_pointer_at_ppu_address(0x3F10 + sprite_palette, READ);
+								}
+							}
+							sprite_bitmaps_low[i] = (sprite_bitmaps_low[i] << 1) & 0xFF;
+							sprite_bitmaps_high[i] = (sprite_bitmaps_high[i] << 1) & 0xFF;
+						}
 					}
 				}
+				
 			}
 			else if (scan_pixel == 257)
 			{

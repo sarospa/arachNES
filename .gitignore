@@ -4,3 +4,4 @@ bin
 *.deb
 /roms/*.bak
 /roms
+/SDL2.dll
