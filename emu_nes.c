@@ -59,9 +59,7 @@ struct Color* palette;
 // TODO LIST
 // Mappers
 // 8x16 sprite mode
-// Sprite priority
 // Sound
-// Scrolling
 // Most of PPUCTRL, PPUMASK
 void exit_emulator()
 {
