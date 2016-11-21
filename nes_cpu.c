@@ -61,7 +61,7 @@ unsigned char* get_pointer_at_cpu_address(unsigned int address, unsigned char ac
 			return read_controller_state(address);
 		}
 	}
-	else if (address == 0x400D)
+	else if (address == 0x400D || address == 0x4009)
 	{
 		return &dummy;
 	}

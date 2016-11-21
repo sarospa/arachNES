@@ -45,6 +45,7 @@ unsigned char* sprite_bitmaps_high;
 unsigned char* sprite_attributes;
 unsigned char* sprite_x_positions;
 unsigned char sprite_count;
+unsigned char sprite_0_selected;
 
 unsigned char pending_nmi;
 // Treated as two-bit shift registers to detect edges.
@@ -73,6 +74,11 @@ unsigned char* get_pointer_at_ppu_address(unsigned int address, unsigned char ac
 	}
 	else if (address >= 0x3F00 && address <= 0x3FFF)
 	{
+		// Sprite background colors are mirrors of tile background colors.
+		if ((address & 0b11) == 0)
+		{
+			address = address & 0b1111111111101111;
+		}
 		// Handle mirroring of 0x3F00 through 0x3F1F.
 		return &palette_ram[address & 0x1F];
 	}
@@ -272,46 +278,6 @@ void notify_ppu_write(unsigned int ppu_register)
 	register_accessed = 0;
 }
 
-void ppu_init()
-{
-	vram_address = 0;
-	vram_temp = 0;
-	fine_x_scroll = 0;
-	
-	ppu_control = 0;
-	ppu_mask = 0;
-	ppu_status = 0;
-	oam_address = 0;
-	ppu_data_buffer = 0;
-	register_accessed = 0;
-	
-	write_toggle = 0;
-	odd_frame = 0;
-	
-	scanline = 261;
-	scan_pixel = 0;
-	
-	nmi_occurred = 0;
-	
-	ppu_ram = malloc(sizeof(char) * 0x800);
-	for (int i = 0; i < 0x800; i++)
-	{
-		ppu_ram[i] = 0;
-	}
-	palette_ram = malloc(sizeof(char) * 0x20);
-	for (int i = 0; i < 0x20; i++)
-	{
-		palette_ram[i] = 0;
-	}
-	oam = malloc(sizeof(char) * 0x100);
-	secondary_oam = malloc(sizeof(char) * 0x40);
-	sprite_bitmaps_low = malloc(sizeof(char) * 0x8);
-	sprite_bitmaps_high = malloc(sizeof(char) * 0x8);
-	sprite_attributes = malloc(sizeof(char) * 0x8);
-	sprite_x_positions = malloc(sizeof(char) * 0x8);
-	sprite_count = 0;
-}
-
 // Increments the coarse X-scroll in VRAM.
 void increment_vram_horz()
 {
@@ -380,6 +346,8 @@ void load_render_registers()
 // any noticable effects (this might affect some games, though).
 void evaluate_sprites()
 {
+	sprite_0_selected = 0;
+	
 	for (int i = 0; i < 0x40; i++)
 	{
 		secondary_oam[i] = 0xFF;
@@ -391,6 +359,10 @@ void evaluate_sprites()
 		// If the sprite falls on the scanline, load it into the secondary OAM for rendering.
 		if ((secondary_oam[sprite_count * 4] <= scanline) && ((secondary_oam[sprite_count * 4] + 8U) > scanline))
 		{
+			if (i == 0)
+			{
+				sprite_0_selected = 1;
+			}
 			secondary_oam[(sprite_count * 4) + 1] = oam[(i * 4) + 1];
 			secondary_oam[(sprite_count * 4) + 2] = oam[(i * 4) + 2];
 			secondary_oam[(sprite_count * 4) + 3] = oam[(i * 4) + 3];
@@ -451,8 +423,8 @@ unsigned char ppu_tick()
 	{
 		if (scan_pixel == 1)
 		{
-			// Clear the vblank flag.
-			ppu_status = ppu_status & 0b01111111;
+			// Clear the vblank and sprite 0 hit flags.
+			ppu_status = ppu_status & 0b00111111;
 			nmi_occurred = nmi_occurred & 0b10;
 		}
 		else if (scan_pixel == 257 && (!render_disable))
@@ -505,9 +477,14 @@ unsigned char ppu_tick()
 				unsigned char background_bitmap_palette =
 					  ((bitmap_register_low >> (8 + fixed_fine_x_scroll)) & 0b1)
 					| ((bitmap_register_high >> (7 + fixed_fine_x_scroll)) & 0b10);
-				unsigned char palette_address = background_bitmap_palette
-					| (((palette_register_low >> fixed_fine_x_scroll) << 2) & 0b100)
-					| (((palette_register_high >> fixed_fine_x_scroll) << 3) & 0b1000);
+				unsigned char palette_address = 0;
+				// All palettes show the same default background color.
+				if (background_bitmap_palette > 0)
+				{
+					palette_address = background_bitmap_palette
+						| (((palette_register_low >> fixed_fine_x_scroll) << 2) & 0b100)
+						| (((palette_register_high >> fixed_fine_x_scroll) << 3) & 0b1000);
+				}
 				unsigned char background_pixel = *get_pointer_at_ppu_address(0x3F00 + palette_address, READ);
 				if (background_enable)
 				{
@@ -536,6 +513,11 @@ unsigned char ppu_tick()
 							{
 								if (background_enable && (background_bitmap_palette > 0) && (sprite_priority == 1))
 								{
+									// Check for sprite 0 hit
+									if ((i == 0) && sprite_0_selected)
+									{
+										ppu_status = ppu_status | 0b1000000;
+									}
 									pixel_data = background_pixel;
 								}
 								else
@@ -613,4 +595,45 @@ unsigned char ppu_tick()
 	nmi_output = ((nmi_output & 0b1) << 1) | (nmi_output & 0b1);
 	
 	return pixel_data;
+}
+
+void ppu_init()
+{
+	vram_address = 0;
+	vram_temp = 0;
+	fine_x_scroll = 0;
+	
+	ppu_control = 0;
+	ppu_mask = 0;
+	ppu_status = 0;
+	oam_address = 0;
+	ppu_data_buffer = 0;
+	register_accessed = 0;
+	
+	write_toggle = 0;
+	odd_frame = 0;
+	
+	scanline = 261;
+	scan_pixel = 0;
+	
+	nmi_occurred = 0;
+	
+	ppu_ram = malloc(sizeof(char) * 0x800);
+	for (int i = 0; i < 0x800; i++)
+	{
+		ppu_ram[i] = 0;
+	}
+	palette_ram = malloc(sizeof(char) * 0x20);
+	for (int i = 0; i < 0x20; i++)
+	{
+		palette_ram[i] = 0;
+	}
+	oam = malloc(sizeof(char) * 0x100);
+	secondary_oam = malloc(sizeof(char) * 0x40);
+	sprite_bitmaps_low = malloc(sizeof(char) * 0x8);
+	sprite_bitmaps_high = malloc(sizeof(char) * 0x8);
+	sprite_attributes = malloc(sizeof(char) * 0x8);
+	sprite_x_positions = malloc(sizeof(char) * 0x8);
+	sprite_count = 0;
+	sprite_0_selected = 0;
 }
