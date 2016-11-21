@@ -192,6 +192,8 @@ void notify_ppu_write(unsigned int ppu_register)
 		case 0x2000:
 		{
 			ppu_control = ppu_bus;
+			// Set the nametable select bits to the temp vram address.
+			vram_temp = (vram_temp & 0b1111001111111111) | ((ppu_control & 0b11) << 10);
 			// Track current state of nmi output on its low bit.
 			if ((ppu_control & 0b10000000) == 0b10000000)
 			{
@@ -293,7 +295,7 @@ void increment_vram_horz()
 // Overwrite VRAM's X-scroll bits with the ones from temp VRAM.
 void reset_vram_horz()
 {
-	vram_address = (vram_address & 0b111101111100000) | (vram_temp & 0b11111) | ((ppu_control & 0b1) << 10);
+	vram_address = (vram_address & 0b111101111100000) | (vram_temp & 0b10000011111);
 }
 
 // Increments the fine Y-scroll in VRAM.
@@ -315,7 +317,7 @@ void increment_vram_vert()
 // Overwrite VRAM's Y-scroll bits with the ones from temp VRAM.
 void reset_vram_vert()
 {
-	vram_address = (vram_address & 0b10000011111) | (vram_temp & 0b111001111100000) | ((ppu_control & 0b10) << 10);
+	vram_address = (vram_address & 0b10000011111) | (vram_temp & 0b111101111100000);
 }
 
 void load_render_registers()
