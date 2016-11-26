@@ -4,6 +4,7 @@
 #include <time.h>
 #include <math.h>
 #include <limits.h>
+#include <SDL.h>
 #include "nes_cpu.h"
 #include "nes_apu.h"
 #include "nes_ppu.h"
@@ -12,8 +13,10 @@
 
 #define RENDER 1
 
-#if RENDER
-#include <SDL.h>
+const unsigned int TEXTURE_WIDTH = 256;
+const unsigned int TEXTURE_HEIGHT = 240;
+unsigned int window_width;
+unsigned int window_height;
 
 union SDL_Event event;
 SDL_Rect rect;
@@ -24,6 +27,14 @@ void *pixels;
 Uint8 *base;
 int pitch;
 unsigned const int frame_millisecs = 16;
+unsigned int x;
+unsigned int y;
+unsigned char* render_buffer;
+const unsigned int RENDER_BUFFER_MAX = 5000;
+unsigned int render_buffer_count;
+unsigned int current_frame;
+unsigned int next_frame;
+unsigned char frame_finished;
 
 SDL_AudioSpec want;
 SDL_AudioDeviceID device;
@@ -41,7 +52,6 @@ unsigned char audio_buffer_last_value = 128;
 const unsigned int audio_device_samples = 4096;
 const unsigned int audio_buffer_max = 4096 * 4;
 unsigned char audio_paused = 10;
-#endif
 
 struct Color
 {
@@ -56,6 +66,8 @@ const int STACK_PAGE = 0x100;
 SDL_GameController* pad;
 struct Color* palette;
 
+unsigned char pause_emulator = 0;
+
 // TODO LIST
 // Mappers
 // 8x16 sprite mode
@@ -63,9 +75,7 @@ struct Color* palette;
 // Most of PPUCTRL, PPUMASK
 void exit_emulator()
 {
-	#if RENDER
     SDL_Quit();
-	#endif
 	
 	exit(0);
 }
@@ -91,26 +101,6 @@ void audio_callback(void* userdata, Uint8* stream, int len)
 // Currently downsampling by averaging each group of samples.
 void push_audio()
 {
-	// Add more or less samples to keep the buffer in sync with the audio device.
-	/*unsigned int buffered_amount;
-	if (audio_buffer_reader > audio_buffer_writer)
-	{
-		buffered_amount = audio_buffer_max - (audio_buffer_reader - audio_buffer_writer);
-	}
-	else
-	{
-			buffered_amount = audio_buffer_writer - audio_buffer_reader;
-	}
-	
-	if ((buffered_amount > (audio_buffer_max / 2)) && (current_samples_per_frame > target_samples_per_frame))
-	{
-		current_samples_per_frame--;
-	}
-	else if (buffered_amount < (audio_buffer_max / 2))
-	{
-		current_samples_per_frame++;
-	}*/
-	
 	float index;
 	// The plus 15 is a little bit magic? I don't want to touch it.
 	samples_this_frame += current_samples_per_frame + 15;
@@ -168,21 +158,365 @@ void push_audio()
 	}
 }
 
-int main(int argc, char *argv[])
+void nes_loop()
 {
-	setbuf(stdout, NULL);
+	char opcode = *get_pointer_at_cpu_address(program_counter, READ);
+	unsigned int cycles = run_opcode(opcode);
 	
-	#if RENDER
-	const unsigned int TEXTURE_WIDTH = 256;
-	const unsigned int TEXTURE_HEIGHT = 240;
-	const unsigned int WINDOW_WIDTH = TEXTURE_WIDTH * 2;
-    const unsigned int WINDOW_HEIGHT = TEXTURE_HEIGHT * 2;
+	for (int i = 0; i < cycles; i++)
+	{
+		apu_tick();
+	}
+	
+	controller_tick();
+	
+	// PPU runs at triple the speed of the CPU.
+	// Call PPU tick three times for every CPU cycle.
+	for (int i = 0; i < (cycles * 3); i++)
+	{
+		unsigned char pixel_data = ppu_tick();
+		if (render_buffer_count < RENDER_BUFFER_MAX)
+		{
+			render_buffer[render_buffer_count] = pixel_data;
+			render_buffer_count++;
+		}
+	}
+}
+
+void render_pixel(unsigned char pixel)
+{
+	if (pixel != 255)
+	{
+		if ((x == 0) && (y == 0))
+		{
+			SDL_LockTexture(texture, NULL, &pixels, &pitch);
+		}
+		
+		base = ((Uint8 *)pixels) + (4 * (y * TEXTURE_WIDTH + x));
+		struct Color pixel_data = palette[pixel];
+		
+		base[0] = pixel_data.blue;
+		base[1] = pixel_data.green;
+		base[2] = pixel_data.red;
+		base[3] = 0;
+		
+		x++;
+		if (x >= TEXTURE_WIDTH)
+		{
+			x = 0;
+			y++;
+		}
+		
+		if (y >= TEXTURE_HEIGHT)
+		{
+			y = 0;
+			SDL_UnlockTexture(texture);
+			SDL_RenderCopy(renderer, texture, NULL, NULL);
+			SDL_RenderPresent(renderer);
+			
+			frame_finished = 1;
+			
+			current_frame = SDL_GetTicks();
+			if (current_frame < next_frame)
+			{
+				SDL_Delay(next_frame - current_frame);
+			}
+			current_frame = SDL_GetTicks();
+			next_frame = current_frame + frame_millisecs;
+		}
+	}
+}
+
+void handle_user_input()
+{
+	unsigned char queued_event = 1;
+	while (queued_event || pause_emulator)
+	{
+		queued_event = SDL_PollEvent(&event);
+		if (pause_emulator)
+		{
+			SDL_Delay(10);
+		}
+		
+		if (queued_event)
+		{
+			switch(event.type)
+			{
+				case SDL_QUIT:
+				{
+					printf("Quitting.\n");
+					exit_emulator();
+					break;
+				}
+				case SDL_CONTROLLERBUTTONDOWN:
+				{
+					switch(event.cbutton.button)
+					{
+						case SDL_CONTROLLER_BUTTON_A:
+						{
+							controller_1_data = controller_1_data | 0b00000001;
+							break;
+						}
+						case SDL_CONTROLLER_BUTTON_B:
+						{
+							controller_1_data = controller_1_data | 0b00000010;
+							break;
+						}
+						case SDL_CONTROLLER_BUTTON_BACK:
+						{
+							controller_1_data = controller_1_data | 0b00000100;
+							break;
+						}
+						case SDL_CONTROLLER_BUTTON_START:
+						{
+							controller_1_data = controller_1_data | 0b00001000;
+							break;
+						}
+						case SDL_CONTROLLER_BUTTON_DPAD_UP:
+						{
+							controller_1_data = controller_1_data | 0b00010000;
+							break;
+						}
+						case SDL_CONTROLLER_BUTTON_DPAD_DOWN:
+						{
+							controller_1_data = controller_1_data | 0b00100000;
+							break;
+						}
+						case SDL_CONTROLLER_BUTTON_DPAD_LEFT:
+						{
+							controller_1_data = controller_1_data | 0b01000000;
+							break;
+						}
+						case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:
+						{
+							controller_1_data = controller_1_data | 0b10000000;
+							break;
+						}
+					}
+					break;
+				}
+				case SDL_CONTROLLERBUTTONUP:
+				{
+					switch(event.cbutton.button)
+					{
+						case SDL_CONTROLLER_BUTTON_A:
+						{
+							controller_1_data = controller_1_data & 0b11111110;
+							break;
+						}
+						case SDL_CONTROLLER_BUTTON_B:
+						{
+							controller_1_data = controller_1_data & 0b11111101;
+							break;
+						}
+						case SDL_CONTROLLER_BUTTON_BACK:
+						{
+							controller_1_data = controller_1_data & 0b11111011;
+							break;
+						}
+						case SDL_CONTROLLER_BUTTON_START:
+						{
+							controller_1_data = controller_1_data & 0b11110111;
+							break;
+						}
+						case SDL_CONTROLLER_BUTTON_DPAD_UP:
+						{
+							controller_1_data = controller_1_data & 0b11101111;
+							break;
+						}
+						case SDL_CONTROLLER_BUTTON_DPAD_DOWN:
+						{
+							controller_1_data = controller_1_data & 0b11011111;
+							break;
+						}
+						case SDL_CONTROLLER_BUTTON_DPAD_LEFT:
+						{
+							controller_1_data = controller_1_data & 0b10111111;
+							break;
+						}
+						case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:
+						{
+							controller_1_data = controller_1_data & 0b01111111;
+							break;
+						}
+					}
+					break;
+				}
+				case SDL_KEYDOWN:
+				{
+					if (!event.key.repeat)
+					{
+						switch(event.key.keysym.scancode)
+						{
+							case SDL_SCANCODE_Z:
+							{
+								controller_1_data = controller_1_data | 0b00000001;
+								break;
+							}
+							case SDL_SCANCODE_X:
+							{
+								controller_1_data = controller_1_data | 0b00000010;
+								break;
+							}
+							case SDL_SCANCODE_RSHIFT:
+							case SDL_SCANCODE_LSHIFT:
+							{
+								controller_1_data = controller_1_data | 0b00000100;
+								break;
+							}
+							case SDL_SCANCODE_RETURN:
+							{
+								controller_1_data = controller_1_data | 0b00001000;
+								break;
+							}
+							case SDL_SCANCODE_UP:
+							{
+								controller_1_data = controller_1_data | 0b00010000;
+								break;
+							}
+							case SDL_SCANCODE_DOWN:
+							{
+								controller_1_data = controller_1_data | 0b00100000;
+								break;
+							}
+							case SDL_SCANCODE_LEFT:
+							{
+								controller_1_data = controller_1_data | 0b01000000;
+								break;
+							}
+							case SDL_SCANCODE_RIGHT:
+							{
+								controller_1_data = controller_1_data | 0b10000000;
+								break;
+							}
+							// debug hotkeys
+							case SDL_SCANCODE_R:
+							{
+								printf("ROM DUMP\n");
+								for (int i = 0; i < 0x1000; i++)
+								{
+									printf("%04X: %02X\n", i, *get_pointer_at_cpu_address(i, READ));
+								}
+								break;
+							}
+							case SDL_SCANCODE_N:
+							{
+								printf("NAMETABLE DUMP\n");
+								for (int i = 0x2000; i <= 0x2FFF; i++)
+								{
+									printf("%04X: %02X\n", i, *get_pointer_at_nametable_address(i));
+								}
+								break;
+							}
+							case SDL_SCANCODE_P:
+							{
+								printf("PATTERN TABLE DUMP\n");
+								for (int i = 0; i <= 0x1FFF; i++)
+								{
+									printf("%04X: %02X\n", i, *get_pointer_at_chr_address(i, READ));
+								}
+								break;
+							}
+							case SDL_SCANCODE_PAUSE:
+							{
+								pause_emulator = !pause_emulator;
+								printf("Setting emulator pause to %d\n", pause_emulator);
+								break;
+							}
+						}
+					}
+					break;
+				}
+				case SDL_KEYUP:
+				{
+					if (!event.key.repeat)
+					{
+						switch(event.key.keysym.scancode)
+						{
+							case SDL_SCANCODE_Z:
+							{
+								controller_1_data = controller_1_data & 0b11111110;
+								break;
+							}
+							case SDL_SCANCODE_X:
+							{
+								controller_1_data = controller_1_data & 0b11111101;
+								break;
+							}
+							case SDL_SCANCODE_RSHIFT:
+							case SDL_SCANCODE_LSHIFT:
+							{
+								controller_1_data = controller_1_data & 0b11111011;
+								break;
+							}
+							case SDL_SCANCODE_RETURN:
+							{
+								controller_1_data = controller_1_data & 0b11110111;
+								break;
+							}
+							case SDL_SCANCODE_UP:
+							{
+								controller_1_data = controller_1_data & 0b11101111;
+								break;
+							}
+							case SDL_SCANCODE_DOWN:
+							{
+								controller_1_data = controller_1_data & 0b11011111;
+								break;
+							}
+							case SDL_SCANCODE_LEFT:
+							{
+								controller_1_data = controller_1_data & 0b10111111;
+								break;
+							}
+							case SDL_SCANCODE_RIGHT:
+							{
+								controller_1_data = controller_1_data & 0b01111111;
+								break;
+							}
+						}
+					}
+					break;
+				}
+			}
+		}
+	}
+}
+
+void handle_movie_input(unsigned char player_one_input)
+{
+	controller_1_data = player_one_input;
+	
+	unsigned char queued_event = 1;
+	while (queued_event)
+	{
+		queued_event = SDL_PollEvent(&event);
+		if (queued_event)
+		{
+			switch(event.type)
+			{
+				case SDL_QUIT:
+				{
+					printf("Quitting.\n");
+					exit_emulator();
+					break;
+				}
+			}
+		}
+	}
+}
+
+void sdl_init()
+{
+	window_width = TEXTURE_WIDTH * 2;
+    window_height = TEXTURE_HEIGHT * 2;
 	
 	SDL_Init(SDL_INIT_TIMER | SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_JOYSTICK | SDL_INIT_AUDIO);
-	window = SDL_CreateWindow("arachNES Emulator", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WINDOW_WIDTH, WINDOW_HEIGHT, 0);
+	window = SDL_CreateWindow("arachNES Emulator", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, window_width, window_height, 0);
 	renderer = SDL_CreateRenderer(window, -1, 0);
 	SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
     texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGB888, SDL_TEXTUREACCESS_STREAMING, TEXTURE_WIDTH, TEXTURE_HEIGHT);
+	render_buffer_count = 0;
 	
 	SDL_memset(&want, 0, sizeof(want));
 	want.freq = audio_frequency;
@@ -195,10 +529,9 @@ int main(int argc, char *argv[])
 	current_samples_per_frame = target_samples_per_frame;
 	samples_this_frame = 0;
 	audio_buffer = malloc(sizeof(int32_t) * audio_buffer_max);
-    #endif
 	
-	unsigned int x = 0;
-    unsigned int y = 0;
+	x = 0;
+    y = 0;
 	
 	int num_joysticks = SDL_NumJoysticks();
 	if (num_joysticks > 0)
@@ -206,8 +539,11 @@ int main(int argc, char *argv[])
 		pad = SDL_GameControllerOpen(0);
 		char* mapping = SDL_GameControllerMapping(pad);
 	}
-	
-	FILE* rom = fopen(argv[1], "rb");
+}
+
+void nes_init(char* rom_name)
+{
+	FILE* rom = fopen(rom_name, "rb");
 	fseek(rom, SEEK_SET, 0);
 	unsigned char header[16];
 	fread(header, 1, 16, rom);
@@ -232,305 +568,9 @@ int main(int argc, char *argv[])
 	fread(palette, sizeof(struct Color), 64, paletteData);
 	fclose(paletteData);
 	
-	unsigned int currentFrame = SDL_GetTicks();
-	unsigned int nextFrame = currentFrame + frame_millisecs;
+	current_frame = SDL_GetTicks();
+	next_frame = current_frame + frame_millisecs;
 	
-	while(1)
-	{
-		#if RENDER
-		if (x == 0)
-		{
-			SDL_LockTexture(texture, NULL, &pixels, &pitch);
-		}
-		#endif
-		
-		char opcode = *get_pointer_at_cpu_address(program_counter, READ);
-		unsigned int cycles = run_opcode(opcode);
-		
-		for (int i = 0; i < cycles; i++)
-		{
-			apu_tick();
-		}
-		
-		controller_tick();
-		
-		// PPU runs at triple the speed of the CPU.
-		// Call PPU tick three times for every CPU cycle.
-		for (int i = 0; i < (cycles * 3); i++)
-		{
-			unsigned char render_pixel = ppu_tick();
-			if (render_pixel != 255)
-			{
-				#if RENDER
-				base = ((Uint8 *)pixels) + (4 * (y * TEXTURE_WIDTH + x));
-				struct Color pixel_data = palette[render_pixel];
-				
-                base[0] = pixel_data.blue;
-                base[1] = pixel_data.green;
-                base[2] = pixel_data.red;
-				base[3] = 0;
-				#endif
-				
-				x++;
-				if (x >= TEXTURE_WIDTH)
-				{
-					x = 0;
-					y++;
-				}
-				
-				if (y >= TEXTURE_HEIGHT)
-				{
-					y = 0;
-					#if RENDER
-					SDL_UnlockTexture(texture);
-					SDL_RenderCopy(renderer, texture, NULL, NULL);
-					SDL_RenderPresent(renderer);
-					while (SDL_PollEvent(&event))
-					{
-						switch(event.type)
-						{
-							case SDL_QUIT:
-							{
-								printf("Quitting.\n");
-								exit_emulator();
-								break;
-							}
-							case SDL_CONTROLLERBUTTONDOWN:
-							{
-								switch(event.cbutton.button)
-								{
-									case SDL_CONTROLLER_BUTTON_A:
-									{
-										controller_1_data = controller_1_data | 0b00000001;
-										break;
-									}
-									case SDL_CONTROLLER_BUTTON_B:
-									{
-										controller_1_data = controller_1_data | 0b00000010;
-										break;
-									}
-									case SDL_CONTROLLER_BUTTON_BACK:
-									{
-										controller_1_data = controller_1_data | 0b00000100;
-										break;
-									}
-									case SDL_CONTROLLER_BUTTON_START:
-									{
-										controller_1_data = controller_1_data | 0b00001000;
-										break;
-									}
-									case SDL_CONTROLLER_BUTTON_DPAD_UP:
-									{
-										controller_1_data = controller_1_data | 0b00010000;
-										break;
-									}
-									case SDL_CONTROLLER_BUTTON_DPAD_DOWN:
-									{
-										controller_1_data = controller_1_data | 0b00100000;
-										break;
-									}
-									case SDL_CONTROLLER_BUTTON_DPAD_LEFT:
-									{
-										controller_1_data = controller_1_data | 0b01000000;
-										break;
-									}
-									case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:
-									{
-										controller_1_data = controller_1_data | 0b10000000;
-										break;
-									}
-								}
-								break;
-							}
-							case SDL_CONTROLLERBUTTONUP:
-							{
-								switch(event.cbutton.button)
-								{
-									case SDL_CONTROLLER_BUTTON_A:
-									{
-										controller_1_data = controller_1_data & 0b11111110;
-										break;
-									}
-									case SDL_CONTROLLER_BUTTON_B:
-									{
-										controller_1_data = controller_1_data & 0b11111101;
-										break;
-									}
-									case SDL_CONTROLLER_BUTTON_BACK:
-									{
-										controller_1_data = controller_1_data & 0b11111011;
-										break;
-									}
-									case SDL_CONTROLLER_BUTTON_START:
-									{
-										controller_1_data = controller_1_data & 0b11110111;
-										break;
-									}
-									case SDL_CONTROLLER_BUTTON_DPAD_UP:
-									{
-										controller_1_data = controller_1_data & 0b11101111;
-										break;
-									}
-									case SDL_CONTROLLER_BUTTON_DPAD_DOWN:
-									{
-										controller_1_data = controller_1_data & 0b11011111;
-										break;
-									}
-									case SDL_CONTROLLER_BUTTON_DPAD_LEFT:
-									{
-										controller_1_data = controller_1_data & 0b10111111;
-										break;
-									}
-									case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:
-									{
-										controller_1_data = controller_1_data & 0b01111111;
-										break;
-									}
-								}
-								break;
-							}
-							case SDL_KEYDOWN:
-							{
-								if (!event.key.repeat)
-								{
-									switch(event.key.keysym.scancode)
-									{
-										case SDL_SCANCODE_Z:
-										{
-											controller_1_data = controller_1_data | 0b00000001;
-											break;
-										}
-										case SDL_SCANCODE_X:
-										{
-											controller_1_data = controller_1_data | 0b00000010;
-											break;
-										}
-										case SDL_SCANCODE_RSHIFT:
-										case SDL_SCANCODE_LSHIFT:
-										{
-											controller_1_data = controller_1_data | 0b00000100;
-											break;
-										}
-										case SDL_SCANCODE_RETURN:
-										{
-											controller_1_data = controller_1_data | 0b00001000;
-											break;
-										}
-										case SDL_SCANCODE_UP:
-										{
-											controller_1_data = controller_1_data | 0b00010000;
-											break;
-										}
-										case SDL_SCANCODE_DOWN:
-										{
-											controller_1_data = controller_1_data | 0b00100000;
-											break;
-										}
-										case SDL_SCANCODE_LEFT:
-										{
-											controller_1_data = controller_1_data | 0b01000000;
-											break;
-										}
-										case SDL_SCANCODE_RIGHT:
-										{
-											controller_1_data = controller_1_data | 0b10000000;
-											break;
-										}
-										// debug hotkeys
-										case SDL_SCANCODE_R:
-										{
-											printf("ROM DUMP\n");
-											for (int i = 0; i < 0x1000; i++)
-											{
-												printf("%04X: %02X\n", i, *get_pointer_at_cpu_address(i, READ));
-											}
-										}
-										case SDL_SCANCODE_N:
-										{
-											printf("NAMETABLE DUMP\n");
-											for (int i = 0x2000; i <= 0x2FFF; i++)
-											{
-												printf("%04X: %02X\n", i, *get_pointer_at_nametable_address(i));
-											}
-										}
-										case SDL_SCANCODE_P:
-										{
-											printf("PATTERN TABLE DUMP\n");
-											for (int i = 0; i <= 0x1FFF; i++)
-											{
-												printf("%04X: %02X\n", i, *get_pointer_at_chr_address(i, READ));
-											}
-										}
-									}
-								}
-								break;
-							}
-							case SDL_KEYUP:
-							{
-								if (!event.key.repeat)
-								{
-									switch(event.key.keysym.scancode)
-									{
-										case SDL_SCANCODE_Z:
-										{
-											controller_1_data = controller_1_data & 0b11111110;
-											break;
-										}
-										case SDL_SCANCODE_X:
-										{
-											controller_1_data = controller_1_data & 0b11111101;
-											break;
-										}
-										case SDL_SCANCODE_RSHIFT:
-										case SDL_SCANCODE_LSHIFT:
-										{
-											controller_1_data = controller_1_data & 0b11111011;
-											break;
-										}
-										case SDL_SCANCODE_RETURN:
-										{
-											controller_1_data = controller_1_data & 0b11110111;
-											break;
-										}
-										case SDL_SCANCODE_UP:
-										{
-											controller_1_data = controller_1_data & 0b11101111;
-											break;
-										}
-										case SDL_SCANCODE_DOWN:
-										{
-											controller_1_data = controller_1_data & 0b11011111;
-											break;
-										}
-										case SDL_SCANCODE_LEFT:
-										{
-											controller_1_data = controller_1_data & 0b10111111;
-											break;
-										}
-										case SDL_SCANCODE_RIGHT:
-										{
-											controller_1_data = controller_1_data & 0b01111111;
-											break;
-										}
-									}
-								}
-								break;
-							}
-						}
-					}
-					
-					push_audio();
-					
-					currentFrame = SDL_GetTicks();
-					if (currentFrame < nextFrame)
-					{
-						SDL_Delay(nextFrame - currentFrame);
-					}
-					currentFrame = SDL_GetTicks();
-					nextFrame = currentFrame + frame_millisecs;
-					#endif
-				}
-			}
-		}
-	}
+	render_buffer = malloc(sizeof(char) * RENDER_BUFFER_MAX);
+	frame_finished = 0;
 }
