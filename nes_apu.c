@@ -282,7 +282,7 @@ void quarter_frame_clock()
 		triangle_linear_counter--;
 	}
 	
-	if ((triangle_linear_control & 0b10000000) == 0b10000000)
+	if ((triangle_linear_control & 0b10000000) == 0)
 	{
 		triangle_linear_reload = 0;
 	}
@@ -306,7 +306,7 @@ void mix_audio()
 	float tnd_out;
 	//tnd_out = 159.79 / ((1.0 / (sequencer[sequencer_index] / 8227.0)) + 100.0); Check for division by zero if we use this
 	tnd_out = 0.03125 * sequencer[sequencer_index];
-	mixer_buffer[apu_buffer_length] = tnd_out + 0.25;
+	mixer_buffer[apu_buffer_length] = tnd_out + 0.234375;
 	apu_buffer_length++;
 }
 

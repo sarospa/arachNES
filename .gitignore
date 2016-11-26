@@ -5,3 +5,4 @@ bin
 /roms/*.bak
 /roms
 /SDL2.dll
+/movies
