@@ -120,6 +120,7 @@ void notify_ppu(unsigned int ppu_register, unsigned char access_type)
 				ppu_bus = ppu_status;
 				// Clear the vblank flag after PPUSTATUS read.
 				ppu_status = ppu_status & 0b01111111;
+				nmi_occurred = nmi_occurred & 0b10;
 			}
 			break;
 		}

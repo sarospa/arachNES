@@ -6,6 +6,7 @@
 
 unsigned char* player_one_input;
 unsigned char* player_two_input;
+unsigned char* commands;
 
 unsigned int frame_count;
 
@@ -44,6 +45,7 @@ int main(int argc, char *argv[])
 	
 	player_one_input = malloc(sizeof(char) * frames);
 	player_two_input = malloc(sizeof(char) * frames);
+	commands = malloc(sizeof(char) * frames);
 	
 	for (unsigned int i = 0; i < frames; i++)
 	{
@@ -61,6 +63,7 @@ int main(int argc, char *argv[])
 		fgetc(movie);
 		if ((!strncmp(line, "|", 1)) && (len >= 22))
 		{
+			commands[current_frame] = line[1] - '0';
 			for (unsigned int i = 0; i < 8; i++)
 			{
 				if (line[3 + i] != '.')
@@ -84,7 +87,7 @@ int main(int argc, char *argv[])
 	nes_init(argv[1]);
 	
 	// Load the first input before the start of the first frame.
-	handle_movie_input(player_one_input[frame_count]);
+	handle_movie_input(player_one_input[frame_count], commands[frame_count]);
 	frame_count++;
 	
 	while (frame_count < frames)
@@ -97,7 +100,7 @@ int main(int argc, char *argv[])
 			
 			if (frame_finished)
 			{
-				handle_movie_input(player_one_input[frame_count]);
+				handle_movie_input(player_one_input[frame_count], commands[frame_count]);
 				frame_count++;
 				push_audio();
 				frame_finished = 0;

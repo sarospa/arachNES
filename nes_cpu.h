@@ -41,6 +41,7 @@ extern unsigned char* prg_rom;
 
 void exit_emulator();
 
+void reset_cpu();
 void cpu_init();
 unsigned int run_opcode(unsigned char opcode);
 unsigned char* get_pointer_at_cpu_address(unsigned int address, unsigned char write);

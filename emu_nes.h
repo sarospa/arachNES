@@ -10,7 +10,7 @@ void sdl_init();
 void nes_init(char* rom_name);
 void nes_loop();
 void handle_user_input();
-void handle_movie_input(unsigned char player_one_input);
+void handle_movie_input(unsigned char player_one_input, unsigned char command);
 void push_audio();
 void render_pixel(unsigned char pixel_data);
 

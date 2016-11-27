@@ -483,9 +483,13 @@ void handle_user_input()
 	}
 }
 
-void handle_movie_input(unsigned char player_one_input)
+void handle_movie_input(unsigned char player_one_input, unsigned char command)
 {
 	controller_1_data = player_one_input;
+	if (command & 0b1)
+	{
+		reset_cpu();
+	}
 	
 	unsigned char queued_event = 1;
 	while (queued_event)

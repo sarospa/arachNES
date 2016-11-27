@@ -21,6 +21,8 @@ unsigned char status_flags;
 unsigned char oam_dma_active;
 unsigned char oam_dma_page;
 
+unsigned int total_cycles;
+
 // Return this for registers we haven't implemented yet.
 unsigned char dummy;
 
@@ -288,7 +290,7 @@ unsigned int branch_on_status_flags(unsigned char mask, unsigned char value)
 			program_counter += adjusted_branch_value;
 		}
 		// Add a cycle if page boundary was crossed, compared to the address of the next instruction.
-		if ((skip_compare & 0x00FF) != (program_counter & 0x00FF))
+		if ((skip_compare & 0xFF00) != (program_counter & 0xFF00))
 		{
 			cycles++;
 		}
@@ -778,7 +780,7 @@ unsigned int run_opcode(unsigned char opcode)
 			test_negative_flag(*target);
 			test_zero_flag(*target);
 			program_counter += 3;
-			cycles = 6;
+			cycles = 7;
 			break;
 		}
 		// DEC: Decrement memory byte.
@@ -1319,7 +1321,7 @@ unsigned int run_opcode(unsigned char opcode)
 			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
 			bitwise_xor(load_byte);
 			program_counter += 3;
-			cycles = 4;
+			cycles = 6;
 			break;
 		}
 		// Indirect,Y EOR. Hex: $51  Len: 2  Time: 5 + 1 [if crossed page boundary]
@@ -1760,7 +1762,7 @@ unsigned int run_opcode(unsigned char opcode)
 			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
 			load_register(&accumulator, load_byte);
 			program_counter += 2;
-			cycles = 3;
+			cycles = 4;
 			break;
 		}
 		// Absolute LDA. Hex: $AD  Len: 3  Time: 4
@@ -1956,7 +1958,7 @@ unsigned int run_opcode(unsigned char opcode)
 			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
 			*target = accumulator;
 			program_counter += 2;
-			cycles = 3;
+			cycles = 4;
 			break;
 		}
 		// Absolute STA. Hex: $8D  Len: 3  Time: 4
@@ -2182,7 +2184,16 @@ unsigned int run_opcode(unsigned char opcode)
 		oam_dma_active = 0;
 	}
 	
+	total_cycles += cycles;
+	
 	return cycles;
+}
+
+void reset_cpu()
+{
+	// JMP to the address at $FFFC.
+	program_counter = 0xFFFB;
+	program_counter = absolute_address();
 }
 
 void cpu_init()
@@ -2197,13 +2208,13 @@ void cpu_init()
 	apu_status = 0;
 	oam_dma_active = 0;
 	
+	total_cycles = 0;
+	
 	cpu_ram = malloc(sizeof(char) * KB * 2);
 	for (unsigned int i = 0; i < KB * 2; i++)
 	{
 		cpu_ram[i] = 0;
 	}
 	
-	// On init, JMP to the address at $FFFC.
-	program_counter = 0xFFFB;
-	run_opcode(0x4C);
+	reset_cpu();
 }
