@@ -83,6 +83,10 @@ int main(int argc, char *argv[])
 	sdl_init();
 	nes_init(argv[1]);
 	
+	// Load the first input before the start of the first frame.
+	handle_movie_input(player_one_input[frame_count]);
+	frame_count++;
+	
 	while (frame_count < frames)
 	{
 		nes_loop();

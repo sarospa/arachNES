@@ -6,8 +6,8 @@ extern int debug_counter;
 extern const int DEBUG_LIMIT;
 #endif
 
-extern const int KB;
-extern const int STACK_PAGE;
+extern const unsigned int KB;
+extern const unsigned int STACK_PAGE;
 
 extern unsigned const char WRITE;
 extern unsigned const char READ;

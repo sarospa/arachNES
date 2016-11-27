@@ -416,7 +416,7 @@ unsigned char pull_from_stack()
 void stack_dump()
 {
 	printf("STACK DUMP\n");
-	for (int i = 0x01FF; i > (STACK_PAGE + stack_pointer); i--)
+	for (unsigned int i = 0x01FF; i > (STACK_PAGE + stack_pointer); i--)
 	{
 		printf("%04X: %02X\n", i, cpu_ram[i]);
 	}
@@ -2198,7 +2198,7 @@ void cpu_init()
 	oam_dma_active = 0;
 	
 	cpu_ram = malloc(sizeof(char) * KB * 2);
-	for (int i = 0; i < KB * 2; i++)
+	for (unsigned int i = 0; i < KB * 2; i++)
 	{
 		cpu_ram[i] = 0;
 	}

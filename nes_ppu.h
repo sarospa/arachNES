@@ -1,7 +1,7 @@
 #ifndef PPU_HEADER
 #define PPU_HEADER
 
-extern const int KB;
+extern const unsigned int KB;
 
 extern unsigned char* ppu_ram;
 extern unsigned char* palette_ram;

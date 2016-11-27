@@ -60,8 +60,8 @@ struct Color
 	unsigned char blue;
 };
 
-const int KB = 1024;
-const int STACK_PAGE = 0x100;
+const unsigned int KB = 1024;
+const unsigned int STACK_PAGE = 0x100;
 
 SDL_GameController* pad;
 struct Color* palette;
@@ -544,6 +544,11 @@ void sdl_init()
 void nes_init(char* rom_name)
 {
 	FILE* rom = fopen(rom_name, "rb");
+	if (rom == NULL)
+	{
+		printf("ROM file could not be opened.\n");
+		exit_emulator();
+	}
 	fseek(rom, SEEK_SET, 0);
 	unsigned char header[16];
 	fread(header, 1, 16, rom);

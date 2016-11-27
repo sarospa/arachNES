@@ -104,6 +104,10 @@ void cartridge_init(unsigned char mapper, unsigned char prg_rom_pages, unsigned 
 	fread(prg_rom, 1, prg_rom_size, rom);
 	
 	prg_ram = malloc(sizeof(char) * KB * 8);
+	for (unsigned int i = 0; i < (KB * 8); i++)
+	{
+		prg_ram[i] = 0;
+	}
 	
 	chr_rom_size = chr_rom_pages * CHR_ROM_PAGE;
 	if (chr_rom_size == 0)
