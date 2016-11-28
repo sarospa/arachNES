@@ -36,6 +36,8 @@ unsigned int current_frame;
 unsigned int next_frame;
 unsigned char frame_finished;
 
+unsigned char dummy;
+
 SDL_AudioSpec want;
 SDL_AudioDeviceID device;
 unsigned const int audio_frequency = 44100;
@@ -72,7 +74,7 @@ unsigned char pause_emulator = 0;
 // Mappers
 // 8x16 sprite mode
 // Sound
-// Most of PPUCTRL, PPUMASK
+// Most of PPUMASK
 void exit_emulator()
 {
     SDL_Quit();

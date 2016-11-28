@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include "emu_nes.h"
 #include "cartridge.h"
 #include "nes_cpu.h"
 #include "nes_ppu.h"
@@ -56,8 +57,7 @@ unsigned char* get_pointer_at_chr_address(unsigned int address, unsigned char ac
 		{
 			if (access_type == WRITE)
 			{
-				printf("Illegally attempting to write to CHR ROM at address %04X.\n", address);
-				exit_emulator();
+				return &dummy;
 			}
 			return &chr_rom[address];
 		}

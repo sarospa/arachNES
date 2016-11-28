@@ -5,6 +5,9 @@ extern unsigned char* render_buffer;
 extern unsigned int render_buffer_count;
 extern unsigned char frame_finished;
 
+// Dummy register for stubbing unimplemented registers and capturing 'ignored' writes.
+extern unsigned char dummy;
+
 void exit_emulator();
 void sdl_init();
 void nes_init(char* rom_name);

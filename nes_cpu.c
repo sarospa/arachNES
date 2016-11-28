@@ -1,6 +1,7 @@
 #include<stdio.h>
 #include<string.h>
 #include<stdlib.h>
+#include "emu_nes.h"
 #include "nes_cpu.h"
 #include "nes_apu.h"
 #include "nes_ppu.h"
@@ -22,9 +23,6 @@ unsigned char oam_dma_active;
 unsigned char oam_dma_page;
 
 unsigned int total_cycles;
-
-// Return this for registers we haven't implemented yet.
-unsigned char dummy;
 
 unsigned char* cpu_ram;
 
