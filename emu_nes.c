@@ -34,6 +34,7 @@ const unsigned int RENDER_BUFFER_MAX = 5000;
 unsigned int render_buffer_count;
 unsigned int current_frame;
 unsigned int next_frame;
+unsigned char unbound_framerate;
 unsigned char frame_finished;
 
 unsigned char dummy;
@@ -54,6 +55,14 @@ unsigned char audio_buffer_last_value = 128;
 const unsigned int audio_device_samples = 4096;
 const unsigned int audio_buffer_max = 4096 * 4;
 unsigned char audio_paused = 10;
+unsigned char silence = 128;
+// Value for how fast the audio can move between playing and silence.
+unsigned char limit_step = 1;
+// Flag to help audio processing.
+unsigned char triangle_playing;
+// Indicates whether the triangle channel is in flux between playing and silence.
+unsigned char triangle_adjusting;
+unsigned char debug_log_sound;
 
 struct Color
 {
@@ -106,10 +115,10 @@ void push_audio()
 	float index;
 	// The plus 15 is a little bit magic? I don't want to touch it.
 	samples_this_frame += current_samples_per_frame + 15;
-	float sample_fraction = current_samples_per_frame / apu_buffer_length;
+	float sample_fraction = samples_this_frame / apu_buffer_length;
 	float apu_sample_processing = 0;
 	unsigned int apu_sample_count = 0;
-	for (index = 0; index < samples_this_frame; index++)
+	for (index = 1; index <= samples_this_frame; index++)
 	{
 		unsigned char sample_size = 0;
 		float sample_total = 0;
@@ -122,16 +131,53 @@ void push_audio()
 		}
 		if (((audio_buffer_writer + 1) % audio_buffer_max) != audio_buffer_reader)
 		{
-			if (sample_size > 0)
+			unsigned char next_value = audio_buffer_last_value;
+			if (!triangle_playing)
 			{
-			audio_buffer[audio_buffer_writer] = (signed char)((roundf((sample_total / sample_size) * 1000) / 1000) * UCHAR_MAX);
-			audio_buffer_last_value = audio_buffer[audio_buffer_writer];
+				next_value = silence;
 			}
-			else
+			else if (sample_size > 0)
 			{
-				audio_buffer[audio_buffer_writer] = audio_buffer_last_value;
+				next_value = (signed char)((roundf((sample_total / sample_size) * 1000) / 1000) * UCHAR_MAX);
 			}
+			
+			// Attempt to move smoothly between playing and silence.
+			if ((!triangle_playing) && triangle_adjusting)
+			{
+				if ((next_value > audio_buffer_last_value) && ((next_value - audio_buffer_last_value) > limit_step))
+				{
+					next_value = audio_buffer_last_value + limit_step;
+				}
+				else if ((audio_buffer_last_value > next_value) && ((audio_buffer_last_value - next_value) > limit_step))
+				{
+					next_value = audio_buffer_last_value - limit_step;
+				}
+				else
+				{
+					triangle_adjusting = 0;
+				}
+			}
+			// If starting to play, wait until the waveform crosses the center.
+			else if (triangle_playing && triangle_adjusting)
+			{
+				if (abs(silence - next_value) < 16)
+				{
+					triangle_adjusting = 0;
+				}
+				else
+				{
+					next_value = silence;
+				}
+			}
+			
+			audio_buffer[audio_buffer_writer] = next_value;
+			audio_buffer_last_value = next_value;
 			audio_buffer_writer = (audio_buffer_writer + 1) % audio_buffer_max;
+			
+			if (debug_log_sound)
+			{
+				printf("Sample value %d\n", next_value);
+			}
 		}
 	}
 	
@@ -165,9 +211,14 @@ void nes_loop()
 	char opcode = *get_pointer_at_cpu_address(program_counter, READ);
 	unsigned int cycles = run_opcode(opcode);
 	
+	unsigned char last_triangle_playing = triangle_playing;
 	for (int i = 0; i < cycles; i++)
 	{
-		apu_tick();
+		apu_tick(&triangle_playing);
+	}
+	if (last_triangle_playing != triangle_playing)
+	{
+		triangle_adjusting = 1;
 	}
 	
 	controller_tick();
@@ -219,7 +270,7 @@ void render_pixel(unsigned char pixel)
 			frame_finished = 1;
 			
 			current_frame = SDL_GetTicks();
-			if (current_frame < next_frame)
+			if ((current_frame < next_frame) && (!unbound_framerate))
 			{
 				SDL_Delay(next_frame - current_frame);
 			}
@@ -419,6 +470,11 @@ void handle_user_input()
 								}
 								break;
 							}
+							case SDL_SCANCODE_S:
+							{
+								debug_log_sound = 1;
+								break;
+							}
 							case SDL_SCANCODE_PAUSE:
 							{
 								pause_emulator = !pause_emulator;
@@ -476,6 +532,12 @@ void handle_user_input()
 								controller_1_data = controller_1_data & 0b01111111;
 								break;
 							}
+							// debug hotkeys
+							case SDL_SCANCODE_S:
+							{
+								debug_log_sound = 0;
+								break;
+							}
 						}
 					}
 					break;
@@ -507,6 +569,25 @@ void handle_movie_input(unsigned char player_one_input, unsigned char command)
 					exit_emulator();
 					break;
 				}
+				case SDL_KEYDOWN:
+				{
+					if (!event.key.repeat)
+					{
+						switch(event.key.keysym.scancode)
+						{
+							case SDL_SCANCODE_EQUALS:
+							{
+								unbound_framerate = 1;
+								break;
+							}
+							case SDL_SCANCODE_MINUS:
+							{
+								unbound_framerate = 0;
+								break;
+							}
+						}
+					}
+				}
 			}
 		}
 	}
@@ -516,6 +597,7 @@ void sdl_init()
 {
 	window_width = TEXTURE_WIDTH * 2;
     window_height = TEXTURE_HEIGHT * 2;
+	unbound_framerate = 0;
 	
 	SDL_Init(SDL_INIT_TIMER | SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_JOYSTICK | SDL_INIT_AUDIO);
 	window = SDL_CreateWindow("arachNES Emulator", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, window_width, window_height, 0);
@@ -535,6 +617,9 @@ void sdl_init()
 	current_samples_per_frame = target_samples_per_frame;
 	samples_this_frame = 0;
 	audio_buffer = malloc(sizeof(int32_t) * audio_buffer_max);
+	triangle_playing = 0;
+	triangle_adjusting = 0;
+	debug_log_sound = 0;
 	
 	x = 0;
     y = 0;

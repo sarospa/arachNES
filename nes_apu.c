@@ -313,7 +313,7 @@ void mix_audio()
 // For convenience, each tick will represent a half clock for the APU.
 // Period timers count down every clock, except triangle timer, which counts down every half clock.
 // Linear counters count down every quarter frame. Length counters count down every half frame.
-void apu_tick()
+void apu_tick(unsigned char* triangle_playing)
 {
 	switch(apu_register_accessed)
 	{
@@ -331,6 +331,7 @@ void apu_tick()
 	
 	if ((triangle_linear_counter > 0) && (triangle_length_counter > 0))
 	{
+		*triangle_playing = 1;
 		if (triangle_timer_count == 0)
 		{
 			sequencer_index = (sequencer_index + 1) % sequencer_size;
@@ -340,6 +341,10 @@ void apu_tick()
 		{
 			triangle_timer_count--;
 		}
+	}
+	else
+	{
+		*triangle_playing = 0;
 	}
 	
 	if ((apu_status & 0b100) == 0)
