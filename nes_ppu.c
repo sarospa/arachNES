@@ -358,9 +358,20 @@ void evaluate_sprites()
 	sprite_count = 0;
 	for (int i = 0; (i < 0x40) && (sprite_count < 0x8); i++)
 	{
+		unsigned char sprite_height;
+		// Check for 8x16 sprite mode
+		if ((ppu_control & 0b00100000) == 0b00100000)
+		{
+			sprite_height = 16;
+		}
+		else
+		{
+			sprite_height = 8;
+		}
+		
 		secondary_oam[sprite_count * 4] = oam[i * 4];
 		// If the sprite falls on the scanline, load it into the secondary OAM for rendering.
-		if ((secondary_oam[sprite_count * 4] <= scanline) && ((secondary_oam[sprite_count * 4] + 8U) > scanline))
+		if ((secondary_oam[sprite_count * 4] <= scanline) && ((secondary_oam[sprite_count * 4] + sprite_height) > scanline))
 		{
 			if (i == 0)
 			{
@@ -377,26 +388,44 @@ void evaluate_sprites()
 // Loads sprites from secondary OAM into rendering buffers.
 void load_sprites()
 {
+	// 8x16 sprite flag.
+	// Tall sprites use the top 7 bits for the top tile number of their sprite,
+	// and bit 0 for their pattern table select. PPUCTRL's table select is ignored.
+	unsigned char tall_sprites = (ppu_control & 0b00100000) == 0b00100000;
+	
 	for (int i = 0; i < 0x8; i++)
 	{
 		unsigned char fine_y = scanline - (secondary_oam[i * 4] + 1);
 		unsigned char sprite_attribute_byte = secondary_oam[(i * 4) + 2];
-		// Flip vertical
-		if ((sprite_attribute_byte & 0b10000000) == 0b10000000)
+		unsigned char tile_number = secondary_oam[(i * 4) + 1];
+		unsigned char flip_vertical = (sprite_attribute_byte & 0b10000000) == 0b10000000;
+		unsigned char pattern_table_select = (ppu_control & 0b1000) == 0b1000;
+		if (tall_sprites)
+		{
+			pattern_table_select = tile_number & 0b1;
+			tile_number = (tile_number & 0b11111110) | ((fine_y >> 3) & 0b1);
+			fine_y = fine_y & 0b111;
+		}
+		
+		if (flip_vertical)
 		{
 			fine_y = fine_y ^ 0b111;
+			if (tall_sprites)
+			{
+				tile_number = tile_number ^ 0b1;
+			}
 		}
-		unsigned char tile_number = secondary_oam[(i * 4) + 1];
 		// An address in the pattern table is encoded thus:
 		// 0HRRRR CCCCPTTT
 		// H is which half of the sprite table.
 		// P is which bit plane we're in. We need both the low and the high one.
 		// TTT is the fine y offset. We get that from which scanline is being drawn.
 		// RRRR indicates row, and CCCC indicates column.
-		unsigned int pattern_address = ((ppu_control & 0b1000) << 9) | (tile_number << 4) | fine_y;
+		unsigned int pattern_address = (pattern_table_select << 12) | (tile_number << 4) | fine_y;
 		unsigned char sprite_bitmap_low = *get_pointer_at_ppu_address(pattern_address, READ);
 		unsigned char sprite_bitmap_high = *get_pointer_at_ppu_address(pattern_address | 0b1000, READ);
 		
+		// Check for horizontal flip attribute.
 		if ((sprite_attribute_byte & 0b1000000) == 0b1000000)
 		{
 			sprite_bitmap_low = reverse_byte(sprite_bitmap_low);
