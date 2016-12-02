@@ -41,7 +41,7 @@ unsigned char dummy;
 
 SDL_AudioSpec want;
 SDL_AudioDeviceID device;
-unsigned const int audio_frequency = 44100;
+unsigned const int audio_frequency = 48000;
 float target_samples_per_frame;
 float current_samples_per_frame;
 float samples_this_frame;
@@ -52,16 +52,12 @@ unsigned char* audio_buffer;
 unsigned int audio_buffer_writer = 0;
 unsigned int audio_buffer_reader = 0;
 unsigned char audio_buffer_last_value = 128;
-const unsigned int audio_device_samples = 4096;
-const unsigned int audio_buffer_max = 4096 * 4;
-unsigned char audio_paused = 10;
+const unsigned int audio_device_samples = 2048;
+const unsigned int audio_buffer_max = 2048 * 4;
+unsigned char audio_paused = 1;
 unsigned char silence = 128;
 // Value for how fast the audio can move between playing and silence.
 unsigned char limit_step = 1;
-// Flag to help audio processing.
-unsigned char triangle_playing;
-// Indicates whether the triangle channel is in flux between playing and silence.
-unsigned char triangle_adjusting;
 unsigned char debug_log_sound;
 
 struct Color
@@ -81,7 +77,6 @@ unsigned char pause_emulator = 0;
 
 // TODO LIST
 // Mappers
-// 8x16 sprite mode
 // Sound
 // Most of PPUMASK
 void exit_emulator()
@@ -132,42 +127,9 @@ void push_audio()
 		if (((audio_buffer_writer + 1) % audio_buffer_max) != audio_buffer_reader)
 		{
 			unsigned char next_value = audio_buffer_last_value;
-			if (!triangle_playing)
-			{
-				next_value = silence;
-			}
-			else if (sample_size > 0)
+			if (sample_size > 0)
 			{
 				next_value = (signed char)((roundf((sample_total / sample_size) * 1000) / 1000) * UCHAR_MAX);
-			}
-			
-			// Attempt to move smoothly between playing and silence.
-			if ((!triangle_playing) && triangle_adjusting)
-			{
-				if ((next_value > audio_buffer_last_value) && ((next_value - audio_buffer_last_value) > limit_step))
-				{
-					next_value = audio_buffer_last_value + limit_step;
-				}
-				else if ((audio_buffer_last_value > next_value) && ((audio_buffer_last_value - next_value) > limit_step))
-				{
-					next_value = audio_buffer_last_value - limit_step;
-				}
-				else
-				{
-					triangle_adjusting = 0;
-				}
-			}
-			// If starting to play, wait until the waveform crosses the center.
-			else if (triangle_playing && triangle_adjusting)
-			{
-				if (abs(silence - next_value) < 16)
-				{
-					triangle_adjusting = 0;
-				}
-				else
-				{
-					next_value = silence;
-				}
 			}
 			
 			audio_buffer[audio_buffer_writer] = next_value;
@@ -211,14 +173,9 @@ void nes_loop()
 	char opcode = *get_pointer_at_cpu_address(program_counter, READ);
 	unsigned int cycles = run_opcode(opcode);
 	
-	unsigned char last_triangle_playing = triangle_playing;
 	for (int i = 0; i < cycles; i++)
 	{
-		apu_tick(&triangle_playing);
-	}
-	if (last_triangle_playing != triangle_playing)
-	{
-		triangle_adjusting = 1;
+		apu_tick();
 	}
 	
 	controller_tick();
@@ -617,8 +574,6 @@ void sdl_init()
 	current_samples_per_frame = target_samples_per_frame;
 	samples_this_frame = 0;
 	audio_buffer = malloc(sizeof(int32_t) * audio_buffer_max);
-	triangle_playing = 0;
-	triangle_adjusting = 0;
 	debug_log_sound = 0;
 	
 	x = 0;

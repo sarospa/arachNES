@@ -12,6 +12,6 @@ extern unsigned const int apu_buffer_max;
 
 unsigned char* apu_read(unsigned int address);
 unsigned char* apu_write(unsigned int address);
-void apu_tick(unsigned char* triangle_playing);
+void apu_tick();
 
 #endif

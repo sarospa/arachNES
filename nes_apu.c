@@ -2,15 +2,36 @@
 #include<string.h>
 #include<stdlib.h>
 #include<stdint.h>
+#include "emu_nes.h"
 #include "nes_apu.h"
 #include "nes_cpu.h"
 
 unsigned int apu_half_clock_count;
-const unsigned int four_step_frame_length = 29830;
-const unsigned int five_step_frame_length = 37282;
+const unsigned int FOUR_STEP_FRAME_LENGTH = 29830;
+const unsigned int FIVE_STEP_FRAME_LENGTH = 37282;
+const unsigned char COARSE_MAX_VOLUME = 15;
 
 unsigned char apu_status;
 unsigned char apu_frame_settings;
+
+// Bits 6-7 are the duty, bit 5 is the length counter halt, bit 4 is the envelope toggle, bits 0-3
+// are the volume/envelope divider period.
+unsigned char pulse_1_control;
+unsigned char pulse_1_sweep;
+// Controls the period of the pulse wave. Counts down every half clock.
+unsigned char pulse_1_timer_low;
+// The low 3 bits are the high bits of the period timer. The high 5 bits are for the length load value.
+unsigned char pulse_1_timer_high;
+unsigned int pulse_1_timer_count;
+unsigned char pulse_1_duty_index;
+unsigned char pulse_1_length_counter;
+unsigned char pulse_1_sweep_divider;
+unsigned char pulse_1_sweep_reload;
+unsigned int pulse_1_target_period;
+unsigned char pulse_1_envelope_start;
+unsigned char pulse_1_envelope_divider;
+unsigned char pulse_1_envelope_decay;
+
 // Contains the linear control flag in bit 7 and the linear load value in bits 6-0.
 // Bit 7 is also the length counter halt flag?
 unsigned char triangle_linear_control;
@@ -20,15 +41,19 @@ unsigned char triangle_timer_low;
 unsigned char triangle_timer_high;
 unsigned int triangle_timer_count;
 unsigned char triangle_linear_reload;
-
-unsigned char* length_table;
+unsigned char triangle_linear_counter;
 unsigned char triangle_length_counter;
 
-unsigned char triangle_linear_counter;
+unsigned char* length_table;
 
 unsigned char* sequencer;
 unsigned char sequencer_index;
 const unsigned char sequencer_size = 32;
+
+// There are four duty waveforms, each with one bit per sample. So why not stuff all four bits in one char for efficiency?
+// This is bad. I'm starting to think like the NES.
+unsigned char* duty_sequence;
+const unsigned char duty_size = 8;
 
 float* mixer_buffer;
 unsigned int apu_buffer_length;
@@ -48,22 +73,24 @@ unsigned char* apu_write(unsigned int address)
 	{
 		case 0x4000:
 		{
-			return &dummy;
+			return &pulse_1_control;
 			break;
 		}
 		case 0x4001:
 		{
-			return &dummy;
+			pulse_1_sweep_reload = 1;
+			return &pulse_1_sweep;
 			break;
 		}
 		case 0x4002:
 		{
-			return &dummy;
+			return &pulse_1_timer_low;
 			break;
 		}
 		case 0x4003:
 		{
-			return &dummy;
+			pulse_1_envelope_start = 1;
+			return &pulse_1_timer_high;
 			break;
 		}
 		case 0x4004:
@@ -164,22 +191,22 @@ unsigned char* apu_read(unsigned int address)
 	{
 		case 0x4000:
 		{
-			return &dummy;
+			return &pulse_1_control;
 			break;
 		}
 		case 0x4001:
 		{
-			return &dummy;
+			return &pulse_1_sweep;
 			break;
 		}
 		case 0x4002:
 		{
-			return &dummy;
+			return &pulse_1_timer_low;
 			break;
 		}
 		case 0x4003:
 		{
-			return &dummy;
+			return &pulse_1_timer_high;
 			break;
 		}
 		case 0x4004:
@@ -271,6 +298,82 @@ unsigned char* apu_read(unsigned int address)
 	}
 }
 
+// Handles the sweep algorithm that manipulates the frequency of the pulse channels.
+void sweep_pulse()
+{
+	unsigned char sweep_enabled = (pulse_1_sweep & 0b10000000) == 0b10000000;
+	unsigned char sweep_negate = (pulse_1_sweep & 0b00001000) == 0b00001000;
+	unsigned int current_period = pulse_1_timer_low + ((pulse_1_timer_high & 0b111) << 8);
+	unsigned char sweep_shift = pulse_1_sweep & 0b111;
+	unsigned char sweep_period = (pulse_1_sweep >> 4) & 0b111;
+	
+	if ((pulse_1_sweep_divider == 0) && sweep_enabled)
+	{
+		signed char sweep_sign;
+		// Due to a bit of oddness in pulse channel 1, in negate mode it subtracts the shifted
+		// value minus one. So this should be accounted for.
+		unsigned char sweep_modifier;
+		if (sweep_negate)
+		{
+			sweep_sign = -1;
+			sweep_modifier = 1;
+		}
+		else
+		{
+			sweep_sign = 1;
+			sweep_modifier = 0;
+		}
+		pulse_1_target_period = current_period + (((current_period >> sweep_shift) * sweep_sign) + sweep_modifier);
+		if ((pulse_1_target_period <= 0x7FF) && (sweep_shift > 0))
+		{
+			pulse_1_timer_low = pulse_1_target_period & 0xFF;
+			pulse_1_timer_high = (pulse_1_timer_high & 0b11111000) | ((pulse_1_target_period >> 8) & 0b111);
+		}
+	}
+	
+	if (((pulse_1_sweep_divider == 0) && sweep_enabled) || pulse_1_sweep_reload)
+	{
+		pulse_1_sweep_divider = sweep_period;
+	}
+	else if (pulse_1_sweep_divider > 0)
+	{
+		pulse_1_sweep_divider--;
+	}
+	
+	pulse_1_sweep_reload = 0;
+}
+
+void clock_envelope()
+{
+	unsigned char pulse_1_envelope_loop = (pulse_1_control & 0b00100000) == 0b00100000;
+	
+	if (pulse_1_envelope_start)
+	{
+		pulse_1_envelope_decay = COARSE_MAX_VOLUME;
+		pulse_1_envelope_divider = pulse_1_control & 0b1111;
+		pulse_1_envelope_start = 0;
+	}
+	else
+	{
+		if (pulse_1_envelope_divider > 0)
+		{
+			pulse_1_envelope_divider--;
+		}
+		else
+		{
+			pulse_1_envelope_divider = pulse_1_control & 0b1111;
+			if (pulse_1_envelope_decay > 0)
+			{
+				pulse_1_envelope_decay--;
+			}
+			else if (pulse_1_envelope_loop)
+			{
+				pulse_1_envelope_decay = COARSE_MAX_VOLUME;
+			}
+		}
+	}
+}
+
 void quarter_frame_clock()
 {
 	if (triangle_linear_reload)
@@ -286,6 +389,8 @@ void quarter_frame_clock()
 	{
 		triangle_linear_reload = 0;
 	}
+	
+	clock_envelope();
 }
 
 void half_frame_clock()
@@ -294,6 +399,13 @@ void half_frame_clock()
 	{
 		triangle_length_counter--;
 	}
+	
+	if ((pulse_1_length_counter > 0) && ((pulse_1_control & 0b00100000) == 0))
+	{
+		pulse_1_length_counter--;
+	}
+	
+	sweep_pulse();
 }
 
 void mix_audio()
@@ -303,20 +415,51 @@ void mix_audio()
 		return;
 	}
 	
-	float tnd_out;
-	//tnd_out = 159.79 / ((1.0 / (sequencer[sequencer_index] / 8227.0)) + 100.0); Check for division by zero if we use this
-	tnd_out = 0.03125 * sequencer[sequencer_index];
-	mixer_buffer[apu_buffer_length] = tnd_out + 0.234375;
+	unsigned char duty_select = (pulse_1_control >> 6) & 0b11;
+	// 0 == use envelope decay, 1 == use constant volume
+	unsigned char pulse_1_volume_flag = (pulse_1_control & 0b00010000) == 0b00010000;
+	unsigned char pulse_1_high;
+	if (pulse_1_volume_flag)
+	{
+		pulse_1_high = (pulse_1_control & 0b1111);
+	}
+	else
+	{
+		pulse_1_high = pulse_1_envelope_decay;
+	}
+	unsigned char pulse_1_volume = pulse_1_high * ((duty_sequence[pulse_1_duty_index] >> duty_select) & 0b1);
+	if (debug_log_sound)
+	{
+		printf("Duty select: %d. Pulse high: %d. Duty index: %d. Duty sequence: %01X.\n", duty_select, pulse_1_high, pulse_1_duty_index, (duty_sequence[pulse_1_duty_index] >> duty_select) & 0b1);
+	}
+	unsigned int pulse_1_timer_value = pulse_1_timer_low + ((pulse_1_timer_high & 0b111) << 8);
+	if ((pulse_1_timer_value < 8) || (pulse_1_length_counter == 0))
+	{
+		pulse_1_volume = 0;
+	}
+	
+	float pulse_out = (0.00752 * pulse_1_volume) - (0.00752 * (pulse_1_high / 2.0));
+	float tnd_out = (0.00851  * sequencer[sequencer_index]) - (0.00851 * 7.5);
+	mixer_buffer[apu_buffer_length] = pulse_out + tnd_out + 0.5;
 	apu_buffer_length++;
 }
 
 // For convenience, each tick will represent a half clock for the APU.
 // Period timers count down every clock, except triangle timer, which counts down every half clock.
 // Linear counters count down every quarter frame. Length counters count down every half frame.
-void apu_tick(unsigned char* triangle_playing)
+void apu_tick()
 {
 	switch(apu_register_accessed)
 	{
+		case 0x4003:
+		{
+			if (access_type == WRITE)
+			{
+				// Reload the length counter with the value from the APU's length lookup table.
+				pulse_1_length_counter = length_table[(pulse_1_timer_high & 0b11111000) >> 3];
+			}
+			break;
+		}
 		case 0x400B:
 		{
 			if (access_type == WRITE)
@@ -329,9 +472,13 @@ void apu_tick(unsigned char* triangle_playing)
 	}
 	apu_register_accessed = 0;
 	
+	if ((apu_status & 0b1) == 0)
+	{
+		pulse_1_length_counter = 0;
+	}
+	
 	if ((triangle_linear_counter > 0) && (triangle_length_counter > 0))
 	{
-		*triangle_playing = 1;
 		if (triangle_timer_count == 0)
 		{
 			sequencer_index = (sequencer_index + 1) % sequencer_size;
@@ -341,10 +488,6 @@ void apu_tick(unsigned char* triangle_playing)
 		{
 			triangle_timer_count--;
 		}
-	}
-	else
-	{
-		*triangle_playing = 0;
 	}
 	
 	if ((apu_status & 0b100) == 0)
@@ -367,7 +510,7 @@ void apu_tick(unsigned char* triangle_playing)
 				quarter_frame_clock();
 			}
 		}
-		apu_half_clock_count = (apu_half_clock_count + 1) % five_step_frame_length;
+		apu_half_clock_count = (apu_half_clock_count + 1) % FIVE_STEP_FRAME_LENGTH;
 	}
 	else
 	{
@@ -384,11 +527,25 @@ void apu_tick(unsigned char* triangle_playing)
 				quarter_frame_clock();
 			}
 		}
-		apu_half_clock_count = (apu_half_clock_count + 1) % four_step_frame_length;
+		apu_half_clock_count = (apu_half_clock_count + 1) % FOUR_STEP_FRAME_LENGTH;
 	}
 	
+	// Anything that should only occur on whole APU clocks goes here.
 	if ((apu_half_clock_count % 2) == 0)
 	{
+		if (pulse_1_length_counter > 0)
+		{
+			if (pulse_1_timer_count == 0)
+			{
+				pulse_1_duty_index = (pulse_1_duty_index + 1) % duty_size;
+				pulse_1_timer_count = pulse_1_timer_low + ((pulse_1_timer_high & 0b111) << 8);;
+			}
+			else
+			{
+				pulse_1_timer_count--;
+			}
+		}
+		
 		mix_audio();
 	}
 }
@@ -407,6 +564,33 @@ void apu_init()
 		sequencer[i + 16] = i;
 		sequencer[15 - i] = i;
 	}
+	
+	pulse_1_control = 0;
+	pulse_1_sweep = 0;
+	pulse_1_timer_low = 0;
+	pulse_1_timer_high = 0;
+	pulse_1_timer_count = 0;
+	pulse_1_duty_index = 0;
+	pulse_1_length_counter = 0;
+	pulse_1_sweep_divider = 0;
+	pulse_1_sweep_reload = 0;
+	pulse_1_target_period = 0;
+	pulse_1_envelope_start = 0;
+	pulse_1_envelope_divider = 0;
+	pulse_1_envelope_decay = 0;
+	
+	// Each duty byte consists of the four bits from each duty sequence.
+	// Bit X selects the sample from duty sequence X.
+	duty_sequence = malloc(sizeof(char) * duty_size);
+	duty_sequence[0] = 0b1000;
+	duty_sequence[1] = 0b1000;
+	duty_sequence[2] = 0b1000;
+	duty_sequence[3] = 0b1000;
+	duty_sequence[4] = 0b1100;
+	duty_sequence[5] = 0b1100;
+	duty_sequence[6] = 0b0110;
+	duty_sequence[7] = 0b0111;
+	
 	apu_buffer_length = 0;
 	mixer_buffer = malloc(sizeof(int) * apu_buffer_max);
 	

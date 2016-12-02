@@ -4,6 +4,7 @@
 extern unsigned char* render_buffer;
 extern unsigned int render_buffer_count;
 extern unsigned char frame_finished;
+extern unsigned char debug_log_sound;
 
 // Dummy register for stubbing unimplemented registers and capturing 'ignored' writes.
 extern unsigned char dummy;
