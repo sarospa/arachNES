@@ -62,6 +62,22 @@ unsigned char triangle_linear_reload;
 unsigned char triangle_linear_counter;
 unsigned char triangle_length_counter;
 
+// Bit 5 is the envelope loop/disable length counter flag, bit 4 is the constant volume flag, bits 0-3
+// are the volume/envelope divider period.
+unsigned char noise_control;
+// Bit 7 is the mode flag, bits 0-3 control the period.
+unsigned char noise_period_control;
+unsigned char noise_length_counter_load;
+unsigned int noise_timer_count;
+// The pseudo-random register used to produce the 'noise'.
+unsigned int noise_bit_stream;
+unsigned char noise_length_counter;
+unsigned char noise_envelope_start;
+unsigned char noise_envelope_divider;
+unsigned char noise_envelope_decay;
+
+unsigned int* noise_period_table;
+
 unsigned char* length_table;
 
 unsigned char* sequencer;
@@ -82,6 +98,12 @@ unsigned char access_type;
 
 // Return this for registers we haven't implemented yet.
 unsigned char dummy;
+
+// Flags to let the user control which channels are played.
+unsigned char pulse_1_silence;
+unsigned char pulse_2_silence;
+unsigned char triangle_silence;
+unsigned char noise_silence;
 
 unsigned char* apu_write(unsigned int address)
 {
@@ -151,17 +173,18 @@ unsigned char* apu_write(unsigned int address)
 		}
 		case 0x400C:
 		{
-			return &dummy;
+			return &noise_control;
 			break;
 		}
 		case 0x400E:
 		{
-			return &dummy;
+			return &noise_period_control;
 			break;
 		}
 		case 0x400F:
 		{
-			return &dummy;
+			noise_envelope_start = 1;
+			return &noise_length_counter_load;
 			break;
 		}
 		case 0x4010:
@@ -266,17 +289,17 @@ unsigned char* apu_read(unsigned int address)
 		}
 		case 0x400C:
 		{
-			return &dummy;
+			return &noise_control;
 			break;
 		}
 		case 0x400E:
 		{
-			return &dummy;
+			return &noise_period_control;
 			break;
 		}
 		case 0x400F:
 		{
-			return &dummy;
+			return &noise_length_counter_load;
 			break;
 		}
 		case 0x4010:
@@ -460,6 +483,56 @@ void clock_envelope()
 			}
 		}
 	}
+	
+	// Noise
+	unsigned char noise_envelope_loop = (noise_control & 0b00100000) == 0b00100000;
+	
+	if (noise_envelope_start)
+	{
+		noise_envelope_decay = COARSE_MAX_VOLUME;
+		noise_envelope_divider = noise_control & 0b1111;
+		noise_envelope_start = 0;
+	}
+	else
+	{
+		if (noise_envelope_divider > 0)
+		{
+			noise_envelope_divider--;
+		}
+		else
+		{
+			noise_envelope_divider = noise_control & 0b1111;
+			if (noise_envelope_decay > 0)
+			{
+				noise_envelope_decay--;
+			}
+			else if (noise_envelope_loop)
+			{
+				noise_envelope_decay = COARSE_MAX_VOLUME;
+			}
+		}
+	}
+}
+
+// Generates a random stream of bits from a 15-bit register.
+// Right shifts, filling in bit 14 with bit 0 XOR bit 6 or bit 0 XOR bit 1,
+// depending on the loop mode.
+void shift_noise_bit_stream()
+{
+	unsigned char loop_mode = (noise_period_control & 0b10000000) == 0b10000000;
+	unsigned char feedback_bit;
+	// bit 0 XOR bit 6 mode
+	if (loop_mode)
+	{
+		feedback_bit = (noise_bit_stream & 0b1) ^ ((noise_bit_stream >> 6) & 0b1);
+	}
+	// bit 0 XOR bit 1 mode
+	else
+	{
+		feedback_bit = (noise_bit_stream & 0b1) ^ ((noise_bit_stream >> 1) & 0b1);
+	}
+	
+	noise_bit_stream = ((noise_bit_stream >> 1) & 0b11111111111111) | ((feedback_bit << 14) & 0b100000000000000);
 }
 
 void quarter_frame_clock()
@@ -496,6 +569,11 @@ void half_frame_clock()
 	if ((pulse_2_length_counter > 0) && ((pulse_2_control & 0b00100000) == 0))
 	{
 		pulse_2_length_counter--;
+	}
+	
+	if ((noise_length_counter > 0) && (noise_control & 0b00100000) == 0)
+	{
+		noise_length_counter--;
 	}
 	
 	sweep_pulse();
@@ -546,8 +624,29 @@ void mix_audio()
 		pulse_2_volume = 0;
 	}
 	
-	float pulse_out = ((0.00752 * pulse_1_volume) - (0.00752 * (pulse_1_high / 2.0))) + ((0.00752 * pulse_2_volume) - (0.00752 * (pulse_2_high / 2.0)));
-	float tnd_out = (0.00851  * sequencer[sequencer_index]) - (0.00851 * 7.5);
+	unsigned char noise_volume_flag = (noise_control & 0b00010000) == 0b00010000;
+	unsigned char noise_high;
+	if (noise_volume_flag)
+	{
+		noise_high = (noise_control & 0b1111);
+	}
+	else
+	{
+		noise_high = noise_envelope_decay;
+	}
+	unsigned char noise_volume = noise_high * !(noise_bit_stream & 0b1);
+	if (noise_length_counter == 0)
+	{
+		noise_volume = 0;
+	}
+	
+	float pulse_1_mix = ((0.00752 * pulse_1_volume) - (0.00752 * (pulse_1_high / 2.0))) * !pulse_1_silence;
+	float pulse_2_mix = ((0.00752 * pulse_2_volume) - (0.00752 * (pulse_2_high / 2.0))) * !pulse_2_silence;
+	float triangle_mix = ((0.00851  * sequencer[sequencer_index]) - (0.00851 * 7.5)) * !triangle_silence;
+	float noise_mix = ((0.00494 * noise_volume) - (0.00494 * noise_high / 2.0)) * !noise_silence;
+	
+	float pulse_out = pulse_1_mix + pulse_2_mix;
+	float tnd_out = triangle_mix + noise_mix;
 	mixer_buffer[apu_buffer_length] = pulse_out + tnd_out + 0.5;
 	apu_buffer_length++;
 }
@@ -586,6 +685,15 @@ void apu_tick()
 			}
 			break;
 		}
+		case 0x400F:
+		{
+			if (access_type == WRITE)
+			{
+				// Reload the length counter with the value from the APU's length lookup table.
+				noise_length_counter = length_table[(noise_length_counter_load & 0b11111000) >> 3];
+			}
+			break;
+		}
 	}
 	apu_register_accessed = 0;
 	
@@ -597,6 +705,11 @@ void apu_tick()
 	if ((apu_status & 0b10) == 0)
 	{
 		pulse_2_length_counter = 0;
+	}
+	
+	if ((apu_status & 0b1000) == 0)
+	{
+		noise_length_counter = 0;
 	}
 	
 	if ((triangle_linear_counter > 0) && (triangle_length_counter > 0))
@@ -681,6 +794,19 @@ void apu_tick()
 			}
 		}
 		
+		if (noise_length_counter > 0)
+		{
+			if (noise_timer_count == 0)
+			{
+				shift_noise_bit_stream();
+				noise_timer_count = noise_period_table[noise_period_control & 0b1111];
+			}
+			else
+			{
+				noise_timer_count--;
+			}
+		}
+		
 		mix_audio();
 	}
 }
@@ -740,6 +866,36 @@ void apu_init()
 	duty_sequence[6] = 0b0110;
 	duty_sequence[7] = 0b0111;
 	
+	noise_control = 0;
+	noise_period_control = 0;
+	noise_length_counter_load = 0;
+	noise_timer_count = 0;
+	// Noise channel's randomized bit stream must be initialized to 1, because if
+	// it is set to 0, it will only ever produce 0s.
+	noise_bit_stream = 1;
+	noise_length_counter = 0;
+	noise_envelope_start = 0;
+	noise_envelope_divider = 0;
+	noise_envelope_decay = 0;
+	
+	noise_period_table = malloc(sizeof(int) * 16);
+	noise_period_table[0] = 4;
+	noise_period_table[1] = 8;
+	noise_period_table[2] = 16;
+	noise_period_table[3] = 32;
+	noise_period_table[4] = 64;
+	noise_period_table[5] = 96;
+	noise_period_table[6] = 128;
+	noise_period_table[7] = 160;
+	noise_period_table[8] = 202;
+	noise_period_table[9] = 254;
+	noise_period_table[10] = 380;
+	noise_period_table[11] = 508;
+	noise_period_table[12] = 762;
+	noise_period_table[13] = 1016;
+	noise_period_table[14] = 2034;
+	noise_period_table[15] = 4068;
+	
 	apu_buffer_length = 0;
 	mixer_buffer = malloc(sizeof(int) * apu_buffer_max);
 	
@@ -782,4 +938,9 @@ void apu_init()
 	triangle_timer_count = 0;
 	
 	apu_register_accessed = 0;
+	
+	pulse_1_silence = 0;
+	pulse_2_silence = 0;
+	triangle_silence = 0;
+	noise_silence = 0;
 }

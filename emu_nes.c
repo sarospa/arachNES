@@ -438,6 +438,27 @@ void handle_user_input()
 								printf("Setting emulator pause to %d\n", pause_emulator);
 								break;
 							}
+							// Silence controls for APU channels.
+							case SDL_SCANCODE_1:
+							{
+								pulse_1_silence = !pulse_1_silence;
+								break;
+							}
+							case SDL_SCANCODE_2:
+							{
+								pulse_2_silence = !pulse_2_silence;
+								break;
+							}
+							case SDL_SCANCODE_3:
+							{
+								triangle_silence = !triangle_silence;
+								break;
+							}
+							case SDL_SCANCODE_4:
+							{
+								noise_silence = !noise_silence;
+								break;
+							}
 						}
 					}
 					break;
