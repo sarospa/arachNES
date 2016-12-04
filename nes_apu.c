@@ -32,6 +32,24 @@ unsigned char pulse_1_envelope_start;
 unsigned char pulse_1_envelope_divider;
 unsigned char pulse_1_envelope_decay;
 
+// Bits 6-7 are the duty, bit 5 is the length counter halt, bit 4 is the envelope toggle, bits 0-3
+// are the volume/envelope divider period.
+unsigned char pulse_2_control;
+unsigned char pulse_2_sweep;
+// Controls the period of the pulse wave. Counts down every half clock.
+unsigned char pulse_2_timer_low;
+// The low 3 bits are the high bits of the period timer. The high 5 bits are for the length load value.
+unsigned char pulse_2_timer_high;
+unsigned int pulse_2_timer_count;
+unsigned char pulse_2_duty_index;
+unsigned char pulse_2_length_counter;
+unsigned char pulse_2_sweep_divider;
+unsigned char pulse_2_sweep_reload;
+unsigned int pulse_2_target_period;
+unsigned char pulse_2_envelope_start;
+unsigned char pulse_2_envelope_divider;
+unsigned char pulse_2_envelope_decay;
+
 // Contains the linear control flag in bit 7 and the linear load value in bits 6-0.
 // Bit 7 is also the length counter halt flag?
 unsigned char triangle_linear_control;
@@ -95,22 +113,24 @@ unsigned char* apu_write(unsigned int address)
 		}
 		case 0x4004:
 		{
-			return &dummy;
+			return &pulse_2_control;
 			break;
 		}
 		case 0x4005:
 		{
-			return &dummy;
+			pulse_2_sweep_reload = 1;
+			return &pulse_2_sweep;
 			break;
 		}
 		case 0x4006:
 		{
-			return &dummy;
+			return &pulse_2_timer_low;
 			break;
 		}
 		case 0x4007:
 		{
-			return &dummy;
+			pulse_2_envelope_start = 1;
+			return &pulse_2_timer_high;
 			break;
 		}
 		case 0x4008:
@@ -211,22 +231,22 @@ unsigned char* apu_read(unsigned int address)
 		}
 		case 0x4004:
 		{
-			return &dummy;
+			return &pulse_2_control;
 			break;
 		}
 		case 0x4005:
 		{
-			return &dummy;
+			return &pulse_2_sweep;
 			break;
 		}
 		case 0x4006:
 		{
-			return &dummy;
+			return &pulse_2_timer_low;
 			break;
 		}
 		case 0x4007:
 		{
-			return &dummy;
+			return &pulse_2_timer_high;
 			break;
 		}
 		case 0x4008:
@@ -301,6 +321,7 @@ unsigned char* apu_read(unsigned int address)
 // Handles the sweep algorithm that manipulates the frequency of the pulse channels.
 void sweep_pulse()
 {
+	// Pulse 1
 	unsigned char sweep_enabled = (pulse_1_sweep & 0b10000000) == 0b10000000;
 	unsigned char sweep_negate = (pulse_1_sweep & 0b00001000) == 0b00001000;
 	unsigned int current_period = pulse_1_timer_low + ((pulse_1_timer_high & 0b111) << 8);
@@ -341,10 +362,48 @@ void sweep_pulse()
 	}
 	
 	pulse_1_sweep_reload = 0;
+	
+	// Pulse 2
+	sweep_enabled = (pulse_2_sweep & 0b10000000) == 0b10000000;
+	sweep_negate = (pulse_2_sweep & 0b00001000) == 0b00001000;
+	current_period = pulse_2_timer_low + ((pulse_2_timer_high & 0b111) << 8);
+	sweep_shift = pulse_2_sweep & 0b111;
+	sweep_period = (pulse_2_sweep >> 4) & 0b111;
+	
+	if ((pulse_2_sweep_divider == 0) && sweep_enabled)
+	{
+		signed char sweep_sign;
+		if (sweep_negate)
+		{
+			sweep_sign = -1;
+		}
+		else
+		{
+			sweep_sign = 1;
+		}
+		pulse_2_target_period = current_period + ((current_period >> sweep_shift) * sweep_sign);
+		if ((pulse_2_target_period <= 0x7FF) && (sweep_shift > 0))
+		{
+			pulse_2_timer_low = pulse_2_target_period & 0xFF;
+			pulse_2_timer_high = (pulse_2_timer_high & 0b11111000) | ((pulse_2_target_period >> 8) & 0b111);
+		}
+	}
+	
+	if (((pulse_2_sweep_divider == 0) && sweep_enabled) || pulse_2_sweep_reload)
+	{
+		pulse_2_sweep_divider = sweep_period;
+	}
+	else if (pulse_2_sweep_divider > 0)
+	{
+		pulse_2_sweep_divider--;
+	}
+	
+	pulse_2_sweep_reload = 0;
 }
 
 void clock_envelope()
 {
+	// Pulse 1
 	unsigned char pulse_1_envelope_loop = (pulse_1_control & 0b00100000) == 0b00100000;
 	
 	if (pulse_1_envelope_start)
@@ -369,6 +428,35 @@ void clock_envelope()
 			else if (pulse_1_envelope_loop)
 			{
 				pulse_1_envelope_decay = COARSE_MAX_VOLUME;
+			}
+		}
+	}
+	
+	// Pulse 2
+	unsigned char pulse_2_envelope_loop = (pulse_1_control & 0b00100000) == 0b00100000;
+	
+	if (pulse_2_envelope_start)
+	{
+		pulse_2_envelope_decay = COARSE_MAX_VOLUME;
+		pulse_2_envelope_divider = pulse_2_control & 0b1111;
+		pulse_2_envelope_start = 0;
+	}
+	else
+	{
+		if (pulse_2_envelope_divider > 0)
+		{
+			pulse_2_envelope_divider--;
+		}
+		else
+		{
+			pulse_2_envelope_divider = pulse_2_control & 0b1111;
+			if (pulse_2_envelope_decay > 0)
+			{
+				pulse_2_envelope_decay--;
+			}
+			else if (pulse_2_envelope_loop)
+			{
+				pulse_2_envelope_decay = COARSE_MAX_VOLUME;
 			}
 		}
 	}
@@ -405,6 +493,11 @@ void half_frame_clock()
 		pulse_1_length_counter--;
 	}
 	
+	if ((pulse_2_length_counter > 0) && ((pulse_2_control & 0b00100000) == 0))
+	{
+		pulse_2_length_counter--;
+	}
+	
 	sweep_pulse();
 }
 
@@ -428,17 +521,32 @@ void mix_audio()
 		pulse_1_high = pulse_1_envelope_decay;
 	}
 	unsigned char pulse_1_volume = pulse_1_high * ((duty_sequence[pulse_1_duty_index] >> duty_select) & 0b1);
-	if (debug_log_sound)
-	{
-		printf("Duty select: %d. Pulse high: %d. Duty index: %d. Duty sequence: %01X.\n", duty_select, pulse_1_high, pulse_1_duty_index, (duty_sequence[pulse_1_duty_index] >> duty_select) & 0b1);
-	}
 	unsigned int pulse_1_timer_value = pulse_1_timer_low + ((pulse_1_timer_high & 0b111) << 8);
 	if ((pulse_1_timer_value < 8) || (pulse_1_length_counter == 0))
 	{
 		pulse_1_volume = 0;
 	}
 	
-	float pulse_out = (0.00752 * pulse_1_volume) - (0.00752 * (pulse_1_high / 2.0));
+	duty_select = (pulse_2_control >> 6) & 0b11;
+	// 0 == use envelope decay, 1 == use constant volume
+	unsigned char pulse_2_volume_flag = (pulse_2_control & 0b00010000) == 0b00010000;
+	unsigned char pulse_2_high;
+	if (pulse_2_volume_flag)
+	{
+		pulse_2_high = (pulse_2_control & 0b1111);
+	}
+	else
+	{
+		pulse_2_high = pulse_2_envelope_decay;
+	}
+	unsigned char pulse_2_volume = pulse_2_high * ((duty_sequence[pulse_2_duty_index] >> duty_select) & 0b1);
+	unsigned int pulse_2_timer_value = pulse_2_timer_low + ((pulse_2_timer_high & 0b111) << 8);
+	if ((pulse_2_timer_value < 8) || (pulse_2_length_counter == 0))
+	{
+		pulse_2_volume = 0;
+	}
+	
+	float pulse_out = ((0.00752 * pulse_1_volume) - (0.00752 * (pulse_1_high / 2.0))) + ((0.00752 * pulse_2_volume) - (0.00752 * (pulse_2_high / 2.0)));
 	float tnd_out = (0.00851  * sequencer[sequencer_index]) - (0.00851 * 7.5);
 	mixer_buffer[apu_buffer_length] = pulse_out + tnd_out + 0.5;
 	apu_buffer_length++;
@@ -460,6 +568,15 @@ void apu_tick()
 			}
 			break;
 		}
+		case 0x4007:
+		{
+			if (access_type == WRITE)
+			{
+				// Reload the length counter with the value from the APU's length lookup table.
+				pulse_2_length_counter = length_table[(pulse_2_timer_high & 0b11111000) >> 3];
+			}
+			break;
+		}
 		case 0x400B:
 		{
 			if (access_type == WRITE)
@@ -475,6 +592,11 @@ void apu_tick()
 	if ((apu_status & 0b1) == 0)
 	{
 		pulse_1_length_counter = 0;
+	}
+	
+	if ((apu_status & 0b10) == 0)
+	{
+		pulse_2_length_counter = 0;
 	}
 	
 	if ((triangle_linear_counter > 0) && (triangle_length_counter > 0))
@@ -546,6 +668,19 @@ void apu_tick()
 			}
 		}
 		
+		if (pulse_2_length_counter > 0)
+		{
+			if (pulse_2_timer_count == 0)
+			{
+				pulse_2_duty_index = (pulse_2_duty_index + 1) % duty_size;
+				pulse_2_timer_count = pulse_2_timer_low + ((pulse_2_timer_high & 0b111) << 8);;
+			}
+			else
+			{
+				pulse_2_timer_count--;
+			}
+		}
+		
 		mix_audio();
 	}
 }
@@ -578,6 +713,20 @@ void apu_init()
 	pulse_1_envelope_start = 0;
 	pulse_1_envelope_divider = 0;
 	pulse_1_envelope_decay = 0;
+	
+	pulse_2_control = 0;
+	pulse_2_sweep = 0;
+	pulse_2_timer_low = 0;
+	pulse_2_timer_high = 0;
+	pulse_2_timer_count = 0;
+	pulse_2_duty_index = 0;
+	pulse_2_length_counter = 0;
+	pulse_2_sweep_divider = 0;
+	pulse_2_sweep_reload = 0;
+	pulse_2_target_period = 0;
+	pulse_2_envelope_start = 0;
+	pulse_2_envelope_divider = 0;
+	pulse_2_envelope_decay = 0;
 	
 	// Each duty byte consists of the four bits from each duty sequence.
 	// Bit X selects the sample from duty sequence X.
