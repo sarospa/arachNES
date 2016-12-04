@@ -5,6 +5,11 @@
 #include "cartridge.h"
 #include "nes_cpu.h"
 #include "nes_ppu.h"
+#include "mappers/nrom00.h"
+#include "mappers/unrom02.h"
+
+typedef unsigned char* (*get_ptr_handler) (unsigned int, unsigned char);
+typedef void (*mapper_init) (void);
 
 const int PRG_ROM_PAGE = 1024 * 16;
 const int CHR_ROM_PAGE = 1024 * 8;
@@ -16,90 +21,50 @@ unsigned char* prg_ram;
 unsigned char* chr_rom;
 unsigned char* chr_ram;
 
+unsigned int prg_rom_pages;
+unsigned int chr_rom_pages;
 unsigned int prg_rom_size;
 unsigned int chr_rom_size;
 unsigned char use_chr_ram;
 unsigned char nametable_mirroring;
+unsigned char mapper;
 
-unsigned char* get_pointer_at_prg_address(unsigned int address)
+mapper_init* init_table;
+get_ptr_handler* mapper_prg_handlers;
+get_ptr_handler* mapper_chr_handlers;
+get_ptr_handler* mapper_nametable_handlers;
+
+unsigned char* get_pointer_at_prg_address(unsigned int address, unsigned char access_type)
 {
-	// 0x6000 through 0x7FFF are for the cartridge's PRG RAM.
-	if (address >= 0x6000 && address <= 0x7FFF)
-	{
-		return &prg_ram[address - 0x6000];
-	}
-	// Assuming for now that we're using mapper type 0.
-	// 0x8000 through 0xBFFF addresses the first 16KB bytes of ROM.
-	// 0xC000 through 0xFFFF addresses the second 16KB bytes if the exist, otherwise it mirrors the first 16KB instead.
-	else if (address >= 0x8000 && address <= 0xFFFF)
-	{
-		unsigned int prg_rom_address = (address - 0x8000) % prg_rom_size;
-		return &prg_rom[prg_rom_address];
-	}
-	else
-	{
-		printf("Unhandled PRG address %04X\n", address);
-		exit_emulator();
-		return NULL;
-	}
+	return mapper_prg_handlers[mapper](address, access_type);
 }
 
 unsigned char* get_pointer_at_chr_address(unsigned int address, unsigned char access_type)
 {
-	// Typically the pattern tables would be stored here.
-	if (address <= 0x1FFF)
-	{
-		if (use_chr_ram)
-		{
-			return &chr_ram[address];
-		}
-		else
-		{
-			if (access_type == WRITE)
-			{
-				return &dummy;
-			}
-			return &chr_rom[address];
-		}
-	}
-	else
-	{
-		printf("Unhandled CHR address %04X\n", address);
-		exit_emulator();
-		return NULL;
-	}
+	return mapper_chr_handlers[mapper](address, access_type);
 }
 
 // The cartridge has control over how the PPU accesses its RAM, normally controlling mirroring.
 // It could even alter it to point to cartridge RAM instead.
-unsigned char* get_pointer_at_nametable_address(unsigned int address)
+unsigned char* get_pointer_at_nametable_address(unsigned int address, unsigned char access_type)
 {
-	unsigned int nametable_address;
-	if (nametable_mirroring == HORIZONTAL)
-	{
-		nametable_address = address % 0x400;
-		if ((address & 0x800) == 0x800)
-		{
-			nametable_address += 0x400;
-		}
-	}
-	else
-	{
-		nametable_address = address % 0x800;
-	}
-	return &ppu_ram[nametable_address];
+	return mapper_nametable_handlers[mapper](address, access_type);
+}
+
+// Default stub for unimplemented mappers. Best to close gracefully rather than...do whatever
+// the emulator will do instead.
+void unsupported_init()
+{
+	printf("Error: Unsupported mapper %02X.\n", mapper);
+	exit_emulator();
 }
 
 // Initializes the cartridge. The mapper is the internal hardware that handles how cartridge addresses work.
 // mirroring controls how PPU nametables are mirrored. 0 is horizontal and 1 is vertical.
-void cartridge_init(unsigned char mapper, unsigned char prg_rom_pages, unsigned char chr_rom_pages, unsigned char mirroring, FILE* rom)
+void cartridge_init(unsigned char rom_mapper, unsigned char prg_pages, unsigned char chr_pages, unsigned char mirroring, FILE* rom)
 {
-	if (mapper != 0)
-	{
-		printf("Warning: Unsupported mapper %02X.\n", mapper);
-	}
-	
-	prg_rom_size = prg_rom_pages * PRG_ROM_PAGE;
+	prg_rom_pages = prg_pages;
+	prg_rom_size = prg_pages * PRG_ROM_PAGE;
 	prg_rom = malloc(sizeof(char) * prg_rom_size);
 	fread(prg_rom, 1, prg_rom_size, rom);
 	
@@ -109,7 +74,8 @@ void cartridge_init(unsigned char mapper, unsigned char prg_rom_pages, unsigned 
 		prg_ram[i] = 0;
 	}
 	
-	chr_rom_size = chr_rom_pages * CHR_ROM_PAGE;
+	chr_rom_pages = chr_pages;
+	chr_rom_size = chr_pages * CHR_ROM_PAGE;
 	if (chr_rom_size == 0)
 	{
 		chr_ram = malloc(sizeof(char) * KB * 8);
@@ -122,4 +88,26 @@ void cartridge_init(unsigned char mapper, unsigned char prg_rom_pages, unsigned 
 		use_chr_ram = 0;
 	}
 	nametable_mirroring = mirroring;
+	mapper = rom_mapper;
+	
+	init_table = calloc(256, sizeof(mapper_init*));
+	for (unsigned int i = 0; i < 256; i++)
+	{
+		init_table[i] = &unsupported_init;
+	}
+	mapper_prg_handlers = calloc(256, sizeof(get_ptr_handler*));
+	mapper_chr_handlers = calloc(256, sizeof(get_ptr_handler*));
+	mapper_nametable_handlers = calloc(256, sizeof(get_ptr_handler*));
+	
+	init_table[0x00] = nrom00_init;
+	mapper_prg_handlers[0x00] = nrom00_get_pointer_at_prg_address;
+	mapper_chr_handlers[0x00] = fixed_get_pointer_at_chr_address;
+	mapper_nametable_handlers[0x00] = fixed_get_pointer_at_nametable_address;
+	
+	init_table[0x02] = unrom02_init;
+	mapper_prg_handlers[0x02] = unrom02_get_pointer_at_prg_address;
+	mapper_chr_handlers[0x02] = fixed_get_pointer_at_chr_address;
+	mapper_nametable_handlers[0x02] = fixed_get_pointer_at_nametable_address;
+	
+	init_table[mapper]();
 }

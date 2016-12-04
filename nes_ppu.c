@@ -70,7 +70,7 @@ unsigned char* get_pointer_at_ppu_address(unsigned int address, unsigned char ac
 	else if (address >= 0x2000 && address <= 0x3EFF)
 	{
 		// Pass the address to the cartridge to handle mirroring and such.
-		return get_pointer_at_nametable_address(address);
+		return get_pointer_at_nametable_address(address, access_type);
 	}
 	else if (address >= 0x3F00 && address <= 0x3FFF)
 	{
@@ -324,7 +324,7 @@ void reset_vram_vert()
 void load_render_registers()
 {
 	unsigned fine_y_scroll = (vram_address >> 12) & 0b111;
-	unsigned char pattern_byte = *get_pointer_at_nametable_address(vram_address & 0b111111111111);
+	unsigned char pattern_byte = *get_pointer_at_nametable_address(vram_address & 0b111111111111, READ);
 	// An address in the pattern table is encoded thus:
 	// 0HRRRR CCCCPTTT
 	// H is which half of the sprite table.

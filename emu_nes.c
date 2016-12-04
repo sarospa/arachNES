@@ -414,7 +414,7 @@ void handle_user_input()
 								printf("NAMETABLE DUMP\n");
 								for (int i = 0x2000; i <= 0x2FFF; i++)
 								{
-									printf("%04X: %02X\n", i, *get_pointer_at_nametable_address(i));
+									printf("%04X: %02X\n", i, *get_pointer_at_nametable_address(i, READ));
 								}
 								break;
 							}

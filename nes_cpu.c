@@ -87,7 +87,7 @@ unsigned char* get_pointer_at_cpu_address(unsigned int address, unsigned char ac
 	}
 	else if (address >= 0x6000 && address <= 0xFFFF)
 	{
-		return get_pointer_at_prg_address(address);
+		return get_pointer_at_prg_address(address, access_type);
 	}
 	else
 	{
