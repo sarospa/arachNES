@@ -1,5 +1,6 @@
 CFLAGS = -O2 -ggdb -Wall -Wextra -std=c99 -Wno-unused-parameter -Wno-switch
 LDFLAGS = -lm
+CC = gcc
 appname = arachnes
 moviename = arach_movie
 
@@ -17,10 +18,14 @@ bin/%.o: %.c
 	mkdir -p bin
 	$(CC) -c $(CFLAGS) $(CPPFLAGS) -o $@ $<
 
-bin/$(appname): bin/emu_nes.o  bin/nes_cpu.o  bin/nes_ppu.o bin/controller.o bin/cartridge.o bin/nes_apu.o bin/arach_play.o
+bin/%.o: mappers/%.c
+	mkdir -p bin
+	$(CC) -c $(CFLAGS) $(CPPFLAGS) -o $@ $<
+
+bin/$(appname): bin/emu_nes.o  bin/nes_cpu.o  bin/nes_ppu.o bin/controller.o bin/cartridge.o bin/nes_apu.o bin/nrom00.o bin/unrom02.o bin/arach_play.o
 	$(CC) $(LDFLAGS) -o $@ $^ $(LIBS)
 
-bin/$(moviename): bin/emu_nes.o  bin/nes_cpu.o  bin/nes_ppu.o bin/controller.o bin/cartridge.o bin/nes_apu.o bin/arach_movie.o
+bin/$(moviename): bin/emu_nes.o  bin/nes_cpu.o  bin/nes_ppu.o bin/controller.o bin/cartridge.o bin/nes_apu.o bin/nrom00.o bin/unrom02.o bin/arach_movie.o
 	$(CC) $(LDFLAGS) -o $@ $^ $(LIBS)
 
 valgrind: bin/$(appname)

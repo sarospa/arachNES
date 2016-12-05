@@ -18,5 +18,6 @@ extern unsigned char noise_silence;
 unsigned char* apu_read(unsigned int address);
 unsigned char* apu_write(unsigned int address);
 void apu_tick();
+void apu_init();
 
 #endif

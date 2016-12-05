@@ -173,7 +173,7 @@ void nes_loop()
 	char opcode = *get_pointer_at_cpu_address(program_counter, READ);
 	unsigned int cycles = run_opcode(opcode);
 	
-	for (int i = 0; i < cycles; i++)
+	for (unsigned int i = 0; i < cycles; i++)
 	{
 		apu_tick();
 	}
@@ -182,7 +182,7 @@ void nes_loop()
 	
 	// PPU runs at triple the speed of the CPU.
 	// Call PPU tick three times for every CPU cycle.
-	for (int i = 0; i < (cycles * 3); i++)
+	for (unsigned int i = 0; i < (cycles * 3); i++)
 	{
 		unsigned char pixel_data = ppu_tick();
 		if (render_buffer_count < RENDER_BUFFER_MAX)
@@ -604,7 +604,6 @@ void sdl_init()
 	if (num_joysticks > 0)
 	{
 		pad = SDL_GameControllerOpen(0);
-		char* mapping = SDL_GameControllerMapping(pad);
 	}
 }
 
