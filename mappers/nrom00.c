@@ -2,10 +2,10 @@
 #include <string.h>
 #include <stdlib.h>
 #include "nrom00.h"
-#include "..\emu_nes.h"
-#include "..\cartridge.h"
-#include "..\nes_cpu.h"
-#include "..\nes_ppu.h"
+#include "../emu_nes.h"
+#include "../cartridge.h"
+#include "../nes_cpu.h"
+#include "../nes_ppu.h"
 
 unsigned char* nrom00_get_pointer_at_prg_address(unsigned int address, unsigned char access_type)
 {

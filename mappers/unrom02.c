@@ -2,10 +2,10 @@
 #include <string.h>
 #include <stdlib.h>
 #include "unrom02.h"
-#include "..\emu_nes.h"
-#include "..\cartridge.h"
-#include "..\nes_cpu.h"
-#include "..\nes_ppu.h"
+#include "../emu_nes.h"
+#include "../cartridge.h"
+#include "../nes_cpu.h"
+#include "../nes_ppu.h"
 
 const unsigned int BANK_SIZE = 0x4000;
 unsigned char bank_select;
