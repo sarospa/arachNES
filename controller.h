@@ -8,7 +8,7 @@ extern unsigned char controller_2_data;
 
 void controller_init();
 void controller_tick();
-unsigned char* write_controller_state(unsigned int address);
-unsigned char* read_controller_state(unsigned int address);
+void write_controller_state(unsigned char* data, unsigned int address);
+void read_controller_state(unsigned char* data, unsigned int address);
 
 #endif

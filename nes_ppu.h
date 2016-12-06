@@ -14,8 +14,7 @@ extern unsigned char pending_nmi;
 void exit_emulator();
 
 void ppu_init();
-void notify_ppu(unsigned int ppu_register, unsigned char access_type);
-void notify_ppu_write(unsigned int ppu_register);
+void access_ppu_register(unsigned char* data, unsigned int ppu_register, unsigned char access_type);
 unsigned char ppu_tick();
 
 #endif

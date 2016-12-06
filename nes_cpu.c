@@ -27,73 +27,105 @@ unsigned int total_cycles;
 unsigned char* cpu_ram;
 
 // Maps CPU addresses to memory pointers. 'access_type' is a flag to indicate whether it is a read or write access.
-unsigned char* get_pointer_at_cpu_address(unsigned int address, unsigned char access_type)
+void get_pointer_at_cpu_address(unsigned char* data, unsigned int address, unsigned char access_type)
 {
-	// First 2KB is the NES's own CPU RAM.
-	// 0x0800 through 0x1FFF mirrors CPU RAM three times.
-	if (address <= 0x1FFF)
+	if (access_type == READ)
 	{
-		unsigned int cpu_ram_address = address % 0x800;
-		return &cpu_ram[cpu_ram_address];
-	}
-	// PPU registers. Found in 0x2000 through 0x2007, but they're mirrored every 8 bytes.
-	else if (address >= 0x2000 && address <= 0x3FFF)
-	{
-		int ppu_register = 0x2000 + (address % 8);
-		notify_ppu(ppu_register, access_type);
-		return &ppu_bus;
-	}
-	else if (address == 0x4014)
-	{
-		oam_dma_active = 1;
-		return &oam_dma_page;
-	}
-	// Player 1 controller port.
-	// Will have to figure that out eventually.
-	else if (address == 0x4016)
-	{
-		if (access_type == WRITE)
+		// First 2KB is the NES's own CPU RAM.
+		// 0x0800 through 0x1FFF mirrors CPU RAM three times.
+		if (address <= 0x1FFF)
 		{
-			return write_controller_state(address);
+			unsigned int cpu_ram_address = address % 0x800;
+			*data = cpu_ram[cpu_ram_address];
+		}
+		// PPU registers. Found in 0x2000 through 0x2007, but they're mirrored every 8 bytes.
+		else if (address >= 0x2000 && address <= 0x3FFF)
+		{
+			int ppu_register = 0x2000 + (address % 8);
+			access_ppu_register(data, ppu_register, access_type);
+		}
+		else if (address == 0x4014)
+		{
+			oam_dma_active = 1;
+			*data = oam_dma_page;
+		}
+		// Player 1 controller port.
+		// Will have to figure that out eventually.
+		else if (address == 0x4016)
+		{
+			read_controller_state(data, address);
+		}
+		// 0x4017 is weird because it's partly controller port 2 and partly APU frame counter.
+		// I'm not using controller port 2 at the moment, so I'll figure this out later.
+		/*else if (address == 0x4017)
+		{
+			if (access_type == WRITE)
+			{
+				
+			}
+		}*/
+		else if (address >= 0x4000 && address <= 0x4017)
+		{
+			apu_read(data, address);
+		}
+		else if (address >= 0x6000 && address <= 0xFFFF)
+		{
+			get_pointer_at_prg_address(data, address, access_type);
 		}
 		else
 		{
-			return read_controller_state(address);
+			printf("Unhandled CPU address %04X\n", address);
+			exit_emulator();
 		}
 	}
-	else if (address == 0x400D || address == 0x4009)
+	else // access_type == WRITE
 	{
-		return &dummy;
-	}
-	// 0x4017 is weird because it's partly controller port 2 and partly APU frame counter.
-	// I'm not using controller port 2 at the moment, so I'll figure this out later.
-	/*else if (address == 0x4017)
-	{
-		if (access_type == WRITE)
+		// First 2KB is the NES's own CPU RAM.
+		// 0x0800 through 0x1FFF mirrors CPU RAM three times.
+		if (address <= 0x1FFF)
 		{
-			
+			unsigned int cpu_ram_address = address % 0x800;
+			cpu_ram[cpu_ram_address] = *data;
 		}
-	}*/
-	else if (address >= 0x4000 && address <= 0x4017)
-	{
-		if (access_type == WRITE)
+		// PPU registers. Found in 0x2000 through 0x2007, but they're mirrored every 8 bytes.
+		else if (address >= 0x2000 && address <= 0x3FFF)
 		{
-			return apu_write(address);
+			int ppu_register = 0x2000 + (address % 8);
+			access_ppu_register(data, ppu_register, access_type);
+		}
+		else if (address == 0x4014)
+		{
+			oam_dma_active = 1;
+			oam_dma_page = *data;
+		}
+		// Player 1 controller port.
+		// Will have to figure that out eventually.
+		else if (address == 0x4016)
+		{
+			write_controller_state(data, address);
+		}
+		// 0x4017 is weird because it's partly controller port 2 and partly APU frame counter.
+		// I'm not using controller port 2 at the moment, so I'll figure this out later.
+		/*else if (address == 0x4017)
+		{
+			if (access_type == WRITE)
+			{
+				
+			}
+		}*/
+		else if (address >= 0x4000 && address <= 0x4017)
+		{
+			apu_write(data, address);
+		}
+		else if (address >= 0x6000 && address <= 0xFFFF)
+		{
+			get_pointer_at_prg_address(data, address, access_type);
 		}
 		else
 		{
-			return apu_read(address);
+			printf("Unhandled CPU address %04X\n", address);
+			exit_emulator();
 		}
-	}
-	else if (address >= 0x6000 && address <= 0xFFFF)
-	{
-		return get_pointer_at_prg_address(address, access_type);
-	}
-	else
-	{
-		printf("Unhandled CPU address %04X\n", address);
-		exit_emulator();
-		return NULL;
 	}
 }
 
@@ -104,26 +136,34 @@ unsigned int immediate_address()
 
 unsigned int zero_page_address()
 {
-	return *get_pointer_at_cpu_address(program_counter + 1, READ);
+	unsigned char data;
+	get_pointer_at_cpu_address(&data, program_counter + 1, READ);
+	return data;
 }
 
 // Should wrap around if it goes past the zero page.
 unsigned int zero_page_indexed_address(unsigned char offset)
 {
-	return (*get_pointer_at_cpu_address(program_counter + 1, READ) + offset) % 0x100;
+	unsigned char data;
+	get_pointer_at_cpu_address(&data, program_counter + 1, READ);
+	return (data + offset) % 0x100;
 }
 
 unsigned int absolute_address()
 {
-	unsigned char low_byte = *get_pointer_at_cpu_address(program_counter + 1, READ);
-	unsigned char high_byte = *get_pointer_at_cpu_address(program_counter + 2, READ);
+	unsigned char low_byte;
+	get_pointer_at_cpu_address(&low_byte, program_counter + 1, READ);
+	unsigned char high_byte;
+	get_pointer_at_cpu_address(&high_byte, program_counter + 2, READ);
 	return low_byte + (high_byte * 0x100);
 }
 
 unsigned int absolute_indexed_address(unsigned char offset, unsigned int* cycles)
 {
-	unsigned char low_byte = *get_pointer_at_cpu_address(program_counter + 1, READ);
-	unsigned char high_byte = *get_pointer_at_cpu_address(program_counter + 2, READ);
+	unsigned char low_byte;
+	get_pointer_at_cpu_address(&low_byte, program_counter + 1, READ);
+	unsigned char high_byte;
+	get_pointer_at_cpu_address(&high_byte, program_counter + 2, READ);
 	unsigned int address = low_byte + (high_byte * 0x100);
 	unsigned int indexed_address = (address + offset) % 0x10000;
 	if ((address & 0xFF00) != (indexed_address & 0xFF00))
@@ -135,18 +175,25 @@ unsigned int absolute_indexed_address(unsigned char offset, unsigned int* cycles
 
 unsigned int zero_page_indirect_address()
 {
-	unsigned char indirect_address_byte = *get_pointer_at_cpu_address(program_counter + 1, READ);
-	unsigned char low_byte = *get_pointer_at_cpu_address(indirect_address_byte, READ);
-	unsigned char high_byte = *get_pointer_at_cpu_address((indirect_address_byte + 1) % 0x100, READ);
+	unsigned char indirect_address_byte;
+	get_pointer_at_cpu_address(&indirect_address_byte, program_counter + 1, READ);
+	unsigned char low_byte;
+	get_pointer_at_cpu_address(&low_byte, indirect_address_byte, READ);
+	unsigned char high_byte;
+	get_pointer_at_cpu_address(&high_byte, (indirect_address_byte + 1) % 0x100, READ);
 	return low_byte + (high_byte * 0x100);
 }
 
 // Adds the index before looking up the indirect address. Always uses the x register as the index.
 unsigned int preindexed_indirect_address()
 {
-	unsigned char indirect_address_byte = *get_pointer_at_cpu_address(program_counter + 1, READ) + x_register;
-	unsigned char low_byte = *get_pointer_at_cpu_address(indirect_address_byte, READ);
-	unsigned char high_byte = *get_pointer_at_cpu_address((indirect_address_byte + 1) % 0x100, READ);
+	unsigned char indirect_address_byte;
+	get_pointer_at_cpu_address(&indirect_address_byte, program_counter + 1, READ);
+	indirect_address_byte += x_register;
+	unsigned char low_byte;
+	get_pointer_at_cpu_address(&low_byte, indirect_address_byte, READ);
+	unsigned char high_byte;
+	get_pointer_at_cpu_address(&high_byte, (indirect_address_byte + 1) % 0x100, READ);
 	unsigned int address = low_byte + (high_byte * 0x100);
 	return address;
 }
@@ -154,9 +201,12 @@ unsigned int preindexed_indirect_address()
 // Adds the index after looking up the indirect address. Always uses the y register as the index.
 unsigned int postindexed_indirect_address(unsigned int* cycles)
 {
-	unsigned char indirect_address_byte = *get_pointer_at_cpu_address(program_counter + 1, READ);
-	unsigned char low_byte = *get_pointer_at_cpu_address(indirect_address_byte, READ);
-	unsigned char high_byte = *get_pointer_at_cpu_address((indirect_address_byte + 1) % 0x100, READ);
+	unsigned char indirect_address_byte;
+	get_pointer_at_cpu_address(&indirect_address_byte, program_counter + 1, READ);
+	unsigned char low_byte;
+	get_pointer_at_cpu_address(&low_byte, indirect_address_byte, READ);
+	unsigned char high_byte;
+	get_pointer_at_cpu_address(&high_byte, (indirect_address_byte + 1) % 0x100, READ);
 	unsigned int address = low_byte + (high_byte * 0x100);
 	unsigned int indexed_address = (address + y_register) % 0x10000;
 	if ((address & 0xFF00) != (indexed_address & 0xFF00))
@@ -274,7 +324,8 @@ unsigned int branch_on_status_flags(unsigned char mask, unsigned char value)
 	if ((status_flags & mask) == value)
 	{
 		cycles++;
-		unsigned char branch_value = *get_pointer_at_cpu_address(immediate_address(), READ);
+		unsigned char branch_value;
+		get_pointer_at_cpu_address(&branch_value, immediate_address(), READ);
 		unsigned char adjusted_branch_value = branch_value;
 		unsigned int skip_compare = program_counter + 2;
 		// Branch values are signed, so values with the high bit set are negative.
@@ -400,8 +451,7 @@ unsigned char rotate_right(unsigned char data)
 // Pushes a byte to the stack. The stack starts at $01FF and grows downward.
 void push_to_stack(unsigned char byte)
 {
-	unsigned char* stack_top = get_pointer_at_cpu_address(STACK_PAGE + stack_pointer, WRITE);
-	*stack_top = byte;
+	get_pointer_at_cpu_address(&byte, STACK_PAGE + stack_pointer, WRITE);
 	stack_pointer--;
 }
 
@@ -409,7 +459,8 @@ void push_to_stack(unsigned char byte)
 unsigned char pull_from_stack()
 {
 	stack_pointer++;
-	unsigned char stack_top_byte = *get_pointer_at_cpu_address(STACK_PAGE + stack_pointer, READ);
+	unsigned char stack_top_byte;
+	get_pointer_at_cpu_address(&stack_top_byte, STACK_PAGE + stack_pointer, READ);
 	return stack_top_byte;
 }
 
@@ -541,11 +592,15 @@ unsigned int run_opcode(unsigned char opcode)
 		// Unlike other forms of indirect addressing modes, an absolute address is used instead of a zero page address.
 		case 0x6C:
 		{
-			unsigned char low_byte = *get_pointer_at_cpu_address(program_counter + 1, READ);
-			unsigned char high_byte = *get_pointer_at_cpu_address(program_counter + 2, READ);
-			unsigned char indirect_low_byte = *get_pointer_at_cpu_address(low_byte + (high_byte * 0x100), READ);
+			unsigned char low_byte;
+			get_pointer_at_cpu_address(&low_byte, program_counter + 1, READ);
+			unsigned char high_byte;
+			get_pointer_at_cpu_address(&high_byte, program_counter + 2, READ);
+			unsigned char indirect_low_byte;
+			get_pointer_at_cpu_address(&indirect_low_byte, low_byte + (high_byte * 0x100), READ);
 			low_byte++; // Intended to overflow to 0x00 if it's at 0xFF.
-			unsigned char indirect_high_byte = *get_pointer_at_cpu_address(low_byte + (high_byte * 0x100), READ);
+			unsigned char indirect_high_byte;
+			get_pointer_at_cpu_address(&indirect_high_byte, low_byte + (high_byte * 0x100), READ);
 			program_counter = indirect_low_byte + (indirect_high_byte * 0x100);
 			cycles = 5;
 			break;
@@ -734,10 +789,12 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0xE6:
 		{
 			unsigned int address = zero_page_address();
-			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
-			*target += 1;
-			test_negative_flag(*target);
-			test_zero_flag(*target);
+			unsigned char target;
+			get_pointer_at_cpu_address(&target, address, READ);
+			target += 1;
+			get_pointer_at_cpu_address(&target, address, WRITE);
+			test_negative_flag(target);
+			test_zero_flag(target);
 			program_counter += 2;
 			cycles = 5;
 			break;
@@ -747,10 +804,12 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0xF6:
 		{
 			unsigned int address = zero_page_indexed_address(x_register);
-			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
-			*target += 1;
-			test_negative_flag(*target);
-			test_zero_flag(*target);
+			unsigned char target;
+			get_pointer_at_cpu_address(&target, address, READ);
+			target += 1;
+			get_pointer_at_cpu_address(&target, address, WRITE);
+			test_negative_flag(target);
+			test_zero_flag(target);
 			program_counter += 2;
 			cycles = 6;
 			break;
@@ -760,10 +819,12 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0xEE:
 		{
 			unsigned int address = absolute_address();
-			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
-			*target += 1;
-			test_negative_flag(*target);
-			test_zero_flag(*target);
+			unsigned char target;
+			get_pointer_at_cpu_address(&target, address, READ);
+			target += 1;
+			get_pointer_at_cpu_address(&target, address, WRITE);
+			test_negative_flag(target);
+			test_zero_flag(target);
 			program_counter += 3;
 			cycles = 6;
 			break;
@@ -773,10 +834,12 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0xFE:
 		{
 			unsigned int address = absolute_address() + x_register;
-			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
-			*target += 1;
-			test_negative_flag(*target);
-			test_zero_flag(*target);
+			unsigned char target;
+			get_pointer_at_cpu_address(&target, address, READ);
+			target += 1;
+			get_pointer_at_cpu_address(&target, address, WRITE);
+			test_negative_flag(target);
+			test_zero_flag(target);
 			program_counter += 3;
 			cycles = 7;
 			break;
@@ -787,10 +850,12 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0xC6:
 		{
 			unsigned int address = zero_page_address();
-			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
-			*target -= 1;
-			test_negative_flag(*target);
-			test_zero_flag(*target);
+			unsigned char target;
+			get_pointer_at_cpu_address(&target, address, READ);
+			target -= 1;
+			get_pointer_at_cpu_address(&target, address, WRITE);
+			test_negative_flag(target);
+			test_zero_flag(target);
 			program_counter += 2;
 			cycles = 5;
 			break;
@@ -800,10 +865,12 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0xD6:
 		{
 			unsigned int address = zero_page_indexed_address(x_register);
-			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
-			*target -= 1;
-			test_negative_flag(*target);
-			test_zero_flag(*target);
+			unsigned char target;
+			get_pointer_at_cpu_address(&target, address, READ);
+			target -= 1;
+			get_pointer_at_cpu_address(&target, address, WRITE);
+			test_negative_flag(target);
+			test_zero_flag(target);
 			program_counter += 2;
 			cycles = 6;
 			break;
@@ -813,10 +880,12 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0xCE:
 		{
 			unsigned int address = absolute_address();
-			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
-			*target -= 1;
-			test_negative_flag(*target);
-			test_zero_flag(*target);
+			unsigned char target;
+			get_pointer_at_cpu_address(&target, address, READ);
+			target -= 1;
+			get_pointer_at_cpu_address(&target, address, WRITE);
+			test_negative_flag(target);
+			test_zero_flag(target);
 			program_counter += 3;
 			cycles = 6;
 			break;
@@ -826,10 +895,12 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0xDE:
 		{
 			unsigned int address = absolute_address() + x_register;
-			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
-			*target -= 1;
-			test_negative_flag(*target);
-			test_zero_flag(*target);
+			unsigned char target;
+			get_pointer_at_cpu_address(&target, address, READ);
+			target -= 1;
+			get_pointer_at_cpu_address(&target, address, WRITE);
+			test_negative_flag(target);
+			test_zero_flag(target);
 			program_counter += 3;
 			cycles = 7;
 			break;
@@ -840,7 +911,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x69:
 		{
 			unsigned int address = immediate_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			add_with_carry(load_byte);
 			program_counter += 2;
 			cycles = 2;
@@ -851,7 +923,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x65:
 		{
 			unsigned int address = zero_page_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			add_with_carry(load_byte);
 			program_counter += 2;
 			cycles = 3;
@@ -862,7 +935,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x75:
 		{
 			unsigned int address = zero_page_indexed_address(x_register);
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			add_with_carry(load_byte);
 			program_counter += 2;
 			cycles = 4;
@@ -873,7 +947,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x6D:
 		{
 			unsigned int address = absolute_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			add_with_carry(load_byte);
 			program_counter += 3;
 			cycles = 4;
@@ -885,7 +960,8 @@ unsigned int run_opcode(unsigned char opcode)
 		{
 			cycles = 4;
 			unsigned int address = absolute_indexed_address(x_register, &cycles);
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			add_with_carry(load_byte);
 			program_counter += 3;
 			break;
@@ -896,7 +972,8 @@ unsigned int run_opcode(unsigned char opcode)
 		{
 			cycles = 4;
 			unsigned int address = absolute_indexed_address(y_register, &cycles);
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			add_with_carry(load_byte);
 			program_counter += 3;
 			break;
@@ -906,7 +983,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x61:
 		{
 			unsigned int address = preindexed_indirect_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			add_with_carry(load_byte);
 			program_counter += 2;
 			cycles = 6;
@@ -918,7 +996,8 @@ unsigned int run_opcode(unsigned char opcode)
 		{
 			cycles = 5;
 			unsigned int address = postindexed_indirect_address(&cycles);
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			add_with_carry(load_byte);
 			program_counter += 2;
 			break;
@@ -931,7 +1010,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0xEB:
 		{
 			unsigned int address = immediate_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			subtract_with_carry(load_byte);
 			program_counter += 2;
 			cycles = 2;
@@ -942,7 +1022,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0xE5:
 		{
 			unsigned int address = zero_page_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			subtract_with_carry(load_byte);
 			program_counter += 2;
 			cycles = 3;
@@ -953,7 +1034,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0xF5:
 		{
 			unsigned int address = zero_page_indexed_address(x_register);
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			subtract_with_carry(load_byte);
 			program_counter += 2;
 			cycles = 4;
@@ -964,7 +1046,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0xED:
 		{
 			unsigned int address = absolute_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			subtract_with_carry(load_byte);
 			program_counter += 3;
 			cycles = 4;
@@ -976,7 +1059,8 @@ unsigned int run_opcode(unsigned char opcode)
 		{
 			cycles = 4;
 			unsigned int address = absolute_indexed_address(x_register, &cycles);
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			subtract_with_carry(load_byte);
 			program_counter += 3;
 			break;
@@ -987,7 +1071,8 @@ unsigned int run_opcode(unsigned char opcode)
 		{
 			cycles = 4;
 			unsigned int address = absolute_indexed_address(y_register, &cycles);
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			subtract_with_carry(load_byte);
 			program_counter += 3;
 			break;
@@ -997,7 +1082,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0xE1:
 		{
 			unsigned int address = preindexed_indirect_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			subtract_with_carry(load_byte);
 			program_counter += 2;
 			cycles = 6;
@@ -1009,7 +1095,8 @@ unsigned int run_opcode(unsigned char opcode)
 		{
 			cycles = 5;
 			unsigned int address = postindexed_indirect_address(&cycles);
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			subtract_with_carry(load_byte);
 			program_counter += 2;
 			break;
@@ -1020,7 +1107,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x29:
 		{
 			unsigned int address = immediate_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			bitwise_and(load_byte);
 			program_counter += 2;
 			cycles = 2;
@@ -1031,7 +1119,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x25:
 		{
 			unsigned int address = zero_page_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			bitwise_and(load_byte);
 			program_counter += 2;
 			cycles = 3;
@@ -1042,7 +1131,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x35:
 		{
 			unsigned int address = zero_page_indexed_address(x_register);
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			bitwise_and(load_byte);
 			program_counter += 2;
 			cycles = 4;
@@ -1053,7 +1143,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x2D:
 		{
 			unsigned int address = absolute_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			bitwise_and(load_byte);
 			program_counter += 3;
 			cycles = 4;
@@ -1065,7 +1156,8 @@ unsigned int run_opcode(unsigned char opcode)
 		{
 			cycles = 4;
 			unsigned int address = absolute_indexed_address(x_register, &cycles);
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			bitwise_and(load_byte);
 			program_counter += 3;
 			break;
@@ -1076,7 +1168,8 @@ unsigned int run_opcode(unsigned char opcode)
 		{
 			cycles = 4;
 			unsigned int address = absolute_indexed_address(y_register, &cycles);
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			bitwise_and(load_byte);
 			program_counter += 3;
 			break;
@@ -1086,7 +1179,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x21:
 		{
 			unsigned int address = preindexed_indirect_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			bitwise_and(load_byte);
 			program_counter += 2;
 			cycles = 6;
@@ -1098,7 +1192,8 @@ unsigned int run_opcode(unsigned char opcode)
 		{
 			cycles = 5;
 			unsigned int address = postindexed_indirect_address(&cycles);
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			bitwise_and(load_byte);
 			program_counter += 2;
 			break;
@@ -1110,7 +1205,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x2B:
 		{
 			unsigned int address = immediate_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			bitwise_and(load_byte);
 			if ((status_flags & 0b10000000) == 0b10000000)
 			{
@@ -1130,7 +1226,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x4B:
 		{
 			unsigned int address = immediate_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			bitwise_and(load_byte);
 			accumulator = logical_shift_right(accumulator);
 			program_counter += 2;
@@ -1162,7 +1259,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x09:
 		{
 			unsigned int address = immediate_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			bitwise_or(load_byte);
 			program_counter += 2;
 			cycles = 2;
@@ -1173,7 +1271,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x05:
 		{
 			unsigned int address = zero_page_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			bitwise_or(load_byte);
 			program_counter += 2;
 			cycles = 3;
@@ -1184,7 +1283,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x15:
 		{
 			unsigned int address = zero_page_indexed_address(x_register);
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			bitwise_or(load_byte);
 			program_counter += 2;
 			cycles = 4;
@@ -1195,7 +1295,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x0D:
 		{
 			unsigned int address = absolute_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			bitwise_or(load_byte);
 			program_counter += 3;
 			cycles = 4;
@@ -1207,7 +1308,8 @@ unsigned int run_opcode(unsigned char opcode)
 		{
 			cycles = 4;
 			unsigned int address = absolute_indexed_address(x_register, &cycles);
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			bitwise_or(load_byte);
 			program_counter += 3;
 			break;
@@ -1218,7 +1320,8 @@ unsigned int run_opcode(unsigned char opcode)
 		{
 			cycles = 4;
 			unsigned int address = absolute_indexed_address(y_register, &cycles);
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			bitwise_or(load_byte);
 			program_counter += 3;
 			break;
@@ -1228,7 +1331,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x01:
 		{
 			unsigned int address = preindexed_indirect_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			bitwise_or(load_byte);
 			program_counter += 2;
 			cycles = 6;
@@ -1239,7 +1343,8 @@ unsigned int run_opcode(unsigned char opcode)
 		{
 			cycles = 5;
 			unsigned int address = postindexed_indirect_address(&cycles);
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			bitwise_or(load_byte);
 			program_counter += 2;
 			break;
@@ -1250,7 +1355,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x49:
 		{
 			unsigned int address = immediate_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			bitwise_xor(load_byte);
 			program_counter += 2;
 			cycles = 2;
@@ -1261,7 +1367,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x45:
 		{
 			unsigned int address = zero_page_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			bitwise_xor(load_byte);
 			program_counter += 2;
 			cycles = 3;
@@ -1272,7 +1379,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x55:
 		{
 			unsigned int address = zero_page_indexed_address(x_register);
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			bitwise_xor(load_byte);
 			program_counter += 2;
 			cycles = 4;
@@ -1283,7 +1391,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x4D:
 		{
 			unsigned int address = absolute_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			bitwise_xor(load_byte);
 			program_counter += 3;
 			cycles = 4;
@@ -1295,7 +1404,8 @@ unsigned int run_opcode(unsigned char opcode)
 		{
 			cycles = 4;
 			unsigned int address = absolute_indexed_address(x_register, &cycles);
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			bitwise_xor(load_byte);
 			program_counter += 3;
 			break;
@@ -1306,7 +1416,8 @@ unsigned int run_opcode(unsigned char opcode)
 		{
 			cycles = 4;
 			unsigned int address = absolute_indexed_address(y_register, &cycles);
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			bitwise_xor(load_byte);
 			program_counter += 3;
 			break;
@@ -1316,7 +1427,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x41:
 		{
 			unsigned int address = preindexed_indirect_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			bitwise_xor(load_byte);
 			program_counter += 3;
 			cycles = 6;
@@ -1328,7 +1440,8 @@ unsigned int run_opcode(unsigned char opcode)
 		{
 			cycles = 5;
 			unsigned int address = postindexed_indirect_address(&cycles);
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			bitwise_xor(load_byte);
 			program_counter += 2;
 			break;
@@ -1348,8 +1461,10 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x46:
 		{
 			unsigned int address = zero_page_address();
-			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
-			*target = logical_shift_right(*target);
+			unsigned char target;
+			get_pointer_at_cpu_address(&target, address, READ);
+			target = logical_shift_right(target);
+			get_pointer_at_cpu_address(&target, address, WRITE);
 			program_counter += 2;
 			cycles = 5;
 			break;
@@ -1359,8 +1474,10 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x56:
 		{
 			unsigned int address = zero_page_indexed_address(x_register);
-			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
-			*target = logical_shift_right(*target);
+			unsigned char target;
+			get_pointer_at_cpu_address(&target, address, READ);
+			target = logical_shift_right(target);
+			get_pointer_at_cpu_address(&target, address, WRITE);
 			program_counter += 2;
 			cycles = 6;
 			break;
@@ -1370,8 +1487,10 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x4E:
 		{
 			unsigned int address = absolute_address();
-			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
-			*target = logical_shift_right(*target);
+			unsigned char target;
+			get_pointer_at_cpu_address(&target, address, READ);
+			target = logical_shift_right(target);
+			get_pointer_at_cpu_address(&target, address, WRITE);
 			program_counter += 3;
 			cycles = 6;
 			break;
@@ -1381,8 +1500,10 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x5E:
 		{
 			unsigned int address = absolute_address() + x_register;
-			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
-			*target = logical_shift_right(*target);
+			unsigned char target;
+			get_pointer_at_cpu_address(&target, address, READ);
+			target = logical_shift_right(target);
+			get_pointer_at_cpu_address(&target, address, WRITE);
 			program_counter += 3;
 			cycles = 7;
 			break;
@@ -1402,8 +1523,10 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x06:
 		{
 			unsigned int address = zero_page_address();
-			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
-			*target = arithmetic_shift_left(*target);
+			unsigned char target;
+			get_pointer_at_cpu_address(&target, address, READ);
+			target = arithmetic_shift_left(target);
+			get_pointer_at_cpu_address(&target, address, WRITE);
 			program_counter += 2;
 			cycles = 5;
 			break;
@@ -1412,8 +1535,10 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x16:
 		{
 			unsigned int address = zero_page_indexed_address(x_register);
-			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
-			*target = arithmetic_shift_left(*target);
+			unsigned char target;
+			get_pointer_at_cpu_address(&target, address, READ);
+			target = arithmetic_shift_left(target);
+			get_pointer_at_cpu_address(&target, address, WRITE);
 			program_counter += 2;
 			cycles = 6;
 			break;
@@ -1423,8 +1548,10 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x0E:
 		{
 			unsigned int address = absolute_address();
-			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
-			*target = arithmetic_shift_left(*target);
+			unsigned char target;
+			get_pointer_at_cpu_address(&target, address, READ);
+			target = arithmetic_shift_left(target);
+			get_pointer_at_cpu_address(&target, address, WRITE);
 			program_counter += 3;
 			cycles = 6;
 			break;
@@ -1434,8 +1561,10 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x1E:
 		{
 			unsigned int address = absolute_address() + x_register;
-			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
-			*target = arithmetic_shift_left(*target);
+			unsigned char target;
+			get_pointer_at_cpu_address(&target, address, READ);
+			target = arithmetic_shift_left(target);
+			get_pointer_at_cpu_address(&target, address, WRITE);
 			program_counter += 3;
 			cycles = 7;
 			break;
@@ -1455,8 +1584,10 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x26:
 		{
 			unsigned int address = zero_page_address();
-			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
-			*target = rotate_left(*target);
+			unsigned char target;
+			get_pointer_at_cpu_address(&target, address, READ);
+			target = rotate_left(target);
+			get_pointer_at_cpu_address(&target, address, WRITE);
 			program_counter += 2;
 			cycles = 5;
 			break;
@@ -1466,8 +1597,10 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x36:
 		{
 			unsigned int address = zero_page_indexed_address(x_register);
-			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
-			*target = rotate_left(*target);
+			unsigned char target;
+			get_pointer_at_cpu_address(&target, address, READ);
+			target = rotate_left(target);
+			get_pointer_at_cpu_address(&target, address, WRITE);
 			program_counter += 2;
 			cycles = 6;
 			break;
@@ -1477,8 +1610,10 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x2E:
 		{
 			unsigned int address = absolute_address();
-			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
-			*target = rotate_left(*target);
+			unsigned char target;
+			get_pointer_at_cpu_address(&target, address, READ);
+			target = rotate_left(target);
+			get_pointer_at_cpu_address(&target, address, WRITE);
 			program_counter += 3;
 			cycles = 6;
 			break;
@@ -1488,8 +1623,10 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x3E:
 		{
 			unsigned int address = absolute_address() + x_register;
-			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
-			*target = rotate_left(*target);
+			unsigned char target;
+			get_pointer_at_cpu_address(&target, address, READ);
+			target = rotate_left(target);
+			get_pointer_at_cpu_address(&target, address, WRITE);
 			program_counter += 3;
 			cycles = 7;
 			break;
@@ -1509,8 +1646,10 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x66:
 		{
 			unsigned int address = zero_page_address();
-			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
-			*target = rotate_right(*target);
+			unsigned char target;
+			get_pointer_at_cpu_address(&target, address, READ);
+			target = rotate_right(target);
+			get_pointer_at_cpu_address(&target, address, WRITE);
 			program_counter += 2;
 			cycles = 5;
 			break;
@@ -1520,8 +1659,10 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x76:
 		{
 			unsigned int address = zero_page_indexed_address(x_register);
-			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
-			*target = rotate_right(*target);
+			unsigned char target;
+			get_pointer_at_cpu_address(&target, address, READ);
+			target = rotate_right(target);
+			get_pointer_at_cpu_address(&target, address, WRITE);
 			program_counter += 2;
 			cycles = 6;
 			break;
@@ -1531,8 +1672,10 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x6E:
 		{
 			unsigned int address = absolute_address();
-			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
-			*target = rotate_right(*target);
+			unsigned char target;
+			get_pointer_at_cpu_address(&target, address, READ);
+			target = rotate_right(target);
+			get_pointer_at_cpu_address(&target, address, WRITE);
 			program_counter += 3;
 			cycles = 6;
 			break;
@@ -1542,8 +1685,10 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x7E:
 		{
 			unsigned int address = absolute_address() + x_register;
-			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
-			*target = rotate_right(*target);
+			unsigned char target;
+			get_pointer_at_cpu_address(&target, address, READ);
+			target = rotate_right(target);
+			get_pointer_at_cpu_address(&target, address, WRITE);
 			program_counter += 3;
 			cycles = 7;
 			break;
@@ -1554,7 +1699,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0xC9:
 		{
 			unsigned int address = immediate_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			compare_register(accumulator, load_byte);
 			program_counter += 2;
 			cycles = 2;
@@ -1565,7 +1711,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0xC5:
 		{
 			unsigned int address = zero_page_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			compare_register(accumulator, load_byte);
 			program_counter += 2;
 			cycles = 3;
@@ -1576,7 +1723,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0xD5:
 		{
 			unsigned int address = zero_page_indexed_address(x_register);
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			compare_register(accumulator, load_byte);
 			program_counter += 2;
 			cycles = 4;
@@ -1587,7 +1735,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0xCD:
 		{
 			unsigned int address = absolute_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			compare_register(accumulator, load_byte);
 			program_counter += 3;
 			cycles = 4;
@@ -1599,7 +1748,8 @@ unsigned int run_opcode(unsigned char opcode)
 		{
 			cycles = 4;
 			unsigned int address = absolute_indexed_address(x_register, &cycles);
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			compare_register(accumulator, load_byte);
 			program_counter += 3;
 			break;
@@ -1610,7 +1760,8 @@ unsigned int run_opcode(unsigned char opcode)
 		{
 			cycles = 4;
 			unsigned int address = absolute_indexed_address(y_register, &cycles);
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			compare_register(accumulator, load_byte);
 			program_counter += 3;
 			break;
@@ -1620,7 +1771,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0xC1:
 		{
 			unsigned int address = preindexed_indirect_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			compare_register(accumulator, load_byte);
 			program_counter += 2;
 			cycles = 6;
@@ -1632,7 +1784,8 @@ unsigned int run_opcode(unsigned char opcode)
 		{
 			cycles = 5;
 			unsigned int address = postindexed_indirect_address(&cycles);
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			compare_register(accumulator, load_byte);
 			program_counter += 2;
 			break;
@@ -1642,7 +1795,9 @@ unsigned int run_opcode(unsigned char opcode)
 		// Affects flags S, Z, and C.
 		case 0xE0:
 		{
-			unsigned char load_byte = *get_pointer_at_cpu_address(program_counter + 1, READ);
+			unsigned int address = immediate_address();
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			compare_register(x_register, load_byte);
 			program_counter += 2;
 			cycles = 2;
@@ -1653,7 +1808,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0xE4:
 		{
 			unsigned int address = zero_page_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			compare_register(x_register, load_byte);
 			program_counter += 2;
 			cycles = 3;
@@ -1664,7 +1820,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0xEC:
 		{
 			unsigned int address = absolute_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			compare_register(x_register, load_byte);
 			program_counter += 3;
 			cycles = 4;
@@ -1676,7 +1833,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0xC0:
 		{
 			unsigned int address = immediate_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			compare_register(y_register, load_byte);
 			program_counter += 2;
 			cycles = 2;
@@ -1687,7 +1845,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0xC4:
 		{
 			unsigned int address = zero_page_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			compare_register(y_register, load_byte);
 			program_counter += 2;
 			cycles = 3;
@@ -1698,7 +1857,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0xCC:
 		{
 			unsigned int address = absolute_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			compare_register(y_register, load_byte);
 			program_counter += 3;
 			cycles = 4;
@@ -1710,7 +1870,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x24:
 		{
 			unsigned int address = zero_page_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			test_zero_flag(load_byte & accumulator);
 			status_flags = (status_flags & 0b00111111) | (load_byte & 0b11000000);
 			program_counter += 2;
@@ -1722,7 +1883,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x2C:
 		{
 			unsigned int address = absolute_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			test_zero_flag(load_byte & accumulator);
 			status_flags = (status_flags & 0b00111111) | (load_byte & 0b11000000);
 			program_counter += 3;
@@ -1735,7 +1897,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0xA9:
 		{
 			unsigned int address = immediate_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			load_register(&accumulator, load_byte);
 			program_counter += 2;
 			cycles = 2;
@@ -1746,7 +1909,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0xA5:
 		{
 			unsigned int address = zero_page_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			load_register(&accumulator, load_byte);
 			program_counter += 2;
 			cycles = 3;
@@ -1757,7 +1921,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0xB5:
 		{
 			unsigned int address = zero_page_indexed_address(x_register);
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			load_register(&accumulator, load_byte);
 			program_counter += 2;
 			cycles = 4;
@@ -1768,7 +1933,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0xAD:
 		{
 			unsigned int address = absolute_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			load_register(&accumulator, load_byte);
 			program_counter += 3;
 			cycles = 4;
@@ -1780,7 +1946,8 @@ unsigned int run_opcode(unsigned char opcode)
 		{
 			cycles = 4;
 			unsigned int address = absolute_indexed_address(x_register, &cycles);
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			load_register(&accumulator, load_byte);
 			program_counter += 3;
 			break;
@@ -1791,7 +1958,8 @@ unsigned int run_opcode(unsigned char opcode)
 		{
 			cycles = 4;
 			unsigned int address = absolute_indexed_address(y_register, &cycles);
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			load_register(&accumulator, load_byte);
 			program_counter += 3;
 			break;
@@ -1800,7 +1968,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0xA1:
 		{
 			unsigned int address = preindexed_indirect_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			load_register(&accumulator, load_byte);
 			program_counter += 2;
 			cycles = 6;
@@ -1812,7 +1981,8 @@ unsigned int run_opcode(unsigned char opcode)
 		{
 			cycles = 5;
 			unsigned int address = postindexed_indirect_address(&cycles);
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			load_register(&accumulator, load_byte);
 			program_counter += 2;
 			break;
@@ -1832,7 +2002,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0xA2:
 		{
 			unsigned int address = immediate_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			load_register(&x_register, load_byte);
 			program_counter += 2;
 			cycles = 2;
@@ -1843,7 +2014,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0xA6:
 		{
 			unsigned int address = zero_page_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			load_register(&x_register, load_byte);
 			program_counter += 2;
 			cycles = 3;
@@ -1854,7 +2026,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0xB6:
 		{
 			unsigned int address = zero_page_indexed_address(y_register);
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			load_register(&x_register, load_byte);
 			program_counter += 2;
 			cycles = 4;
@@ -1865,7 +2038,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0xAE:
 		{
 			unsigned int address = absolute_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			load_register(&x_register, load_byte);
 			program_counter += 3;
 			cycles = 4;
@@ -1877,7 +2051,8 @@ unsigned int run_opcode(unsigned char opcode)
 		{
 			cycles = 4;
 			unsigned int address = absolute_indexed_address(y_register, &cycles);
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			load_register(&x_register, load_byte);
 			program_counter += 3;
 			break;
@@ -1888,7 +2063,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0xA0:
 		{
 			unsigned int address = immediate_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			load_register(&y_register, load_byte);
 			program_counter += 2;
 			cycles = 2;
@@ -1899,7 +2075,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0xA4:
 		{
 			unsigned int address = zero_page_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			load_register(&y_register, load_byte);
 			program_counter += 2;
 			cycles = 3;
@@ -1910,7 +2087,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0xB4:
 		{
 			unsigned int address = zero_page_indexed_address(x_register);
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			load_register(&y_register, load_byte);
 			program_counter += 2;
 			cycles = 4;
@@ -1921,7 +2099,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0xAC:
 		{
 			unsigned int address = absolute_address();
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			load_register(&y_register, load_byte);
 			program_counter += 3;
 			cycles = 4;
@@ -1933,7 +2112,8 @@ unsigned int run_opcode(unsigned char opcode)
 		{
 			cycles = 4;
 			unsigned int address = absolute_indexed_address(x_register, &cycles);
-			unsigned char load_byte = *get_pointer_at_cpu_address(address, READ);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, address, READ);
 			load_register(&y_register, load_byte);
 			program_counter += 3;
 			break;
@@ -1943,8 +2123,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x85:
 		{
 			unsigned int address = zero_page_address();
-			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
-			*target = accumulator;
+			unsigned char data = accumulator;
+			get_pointer_at_cpu_address(&data, address, WRITE);
 			program_counter += 2;
 			cycles = 3;
 			break;
@@ -1953,8 +2133,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x95:
 		{
 			unsigned int address = zero_page_indexed_address(x_register);
-			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
-			*target = accumulator;
+			unsigned char data = accumulator;
+			get_pointer_at_cpu_address(&data, address, WRITE);
 			program_counter += 2;
 			cycles = 4;
 			break;
@@ -1963,8 +2143,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x8D:
 		{
 			unsigned int address = absolute_address();
-			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
-			*target = accumulator;
+			unsigned char data = accumulator;
+			get_pointer_at_cpu_address(&data, address, WRITE);
 			program_counter += 3;
 			cycles = 4;
 			break;
@@ -1973,8 +2153,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x9D:
 		{
 			unsigned int address = absolute_address() + x_register;
-			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
-			*target = accumulator;
+			unsigned char data = accumulator;
+			get_pointer_at_cpu_address(&data, address, WRITE);
 			program_counter += 3;
 			cycles = 5;
 			break;
@@ -1983,8 +2163,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x99:
 		{
 			unsigned int address = absolute_address() + y_register;
-			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
-			*target = accumulator;
+			unsigned char data = accumulator;
+			get_pointer_at_cpu_address(&data, address, WRITE);
 			program_counter += 3;
 			cycles = 5;
 			break;
@@ -1993,8 +2173,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x81:
 		{
 			unsigned int address = preindexed_indirect_address();
-			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
-			*target = accumulator;
+			unsigned char data = accumulator;
+			get_pointer_at_cpu_address(&data, address, WRITE);
 			program_counter += 2;
 			cycles = 6;
 			break;
@@ -2003,8 +2183,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x91:
 		{
 			unsigned int address = zero_page_indirect_address() + y_register;
-			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
-			*target = accumulator;
+			unsigned char data = accumulator;
+			get_pointer_at_cpu_address(&data, address, WRITE);
 			program_counter += 2;
 			cycles = 6;
 			break;
@@ -2014,8 +2194,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x86:
 		{
 			unsigned address = zero_page_address();
-			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
-			*target = x_register;
+			unsigned char data = x_register;
+			get_pointer_at_cpu_address(&data, address, WRITE);
 			program_counter += 2;
 			cycles = 3;
 			break;
@@ -2024,8 +2204,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x96:
 		{
 			unsigned address = zero_page_indexed_address(y_register);
-			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
-			*target = x_register;
+			unsigned char data = x_register;
+			get_pointer_at_cpu_address(&data, address, WRITE);
 			program_counter += 2;
 			cycles = 4;
 			break;
@@ -2034,8 +2214,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x8E:
 		{
 			unsigned int address = absolute_address();
-			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
-			*target = x_register;
+			unsigned char data = x_register;
+			get_pointer_at_cpu_address(&data, address, WRITE);
 			program_counter += 3;
 			cycles = 4;
 			break;
@@ -2045,8 +2225,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x84:
 		{
 			unsigned int address = zero_page_address();
-			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
-			*target = y_register;
+			unsigned char data = y_register;
+			get_pointer_at_cpu_address(&data, address, WRITE);
 			program_counter += 2;
 			cycles = 3;
 			break;
@@ -2055,8 +2235,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x94:
 		{
 			unsigned int address = zero_page_indexed_address(x_register);
-			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
-			*target = y_register;
+			unsigned char data = y_register;
+			get_pointer_at_cpu_address(&data, address, WRITE);
 			program_counter += 2;
 			cycles = 4;
 			break;
@@ -2065,8 +2245,8 @@ unsigned int run_opcode(unsigned char opcode)
 		case 0x8C:
 		{
 			unsigned int address = absolute_address();
-			unsigned char* target = get_pointer_at_cpu_address(address, WRITE);
-			*target = y_register;
+			unsigned char data = y_register;
+			get_pointer_at_cpu_address(&data, address, WRITE);
 			program_counter += 3;
 			cycles = 4;
 			break;
@@ -2139,8 +2319,10 @@ unsigned int run_opcode(unsigned char opcode)
 			push_to_stack(program_counter / 0x100);
 			push_to_stack(program_counter % 0x100);
 			push_to_stack((status_flags | 0b00100000) & 0b11101111);
-			unsigned char low_address_byte = *get_pointer_at_cpu_address(0xFFFE, READ);
-			unsigned char high_address_byte = *get_pointer_at_cpu_address(0xFFFF, READ);
+			unsigned char low_address_byte;
+			get_pointer_at_cpu_address(&low_address_byte, 0xFFFE, READ);
+			unsigned char high_address_byte;
+			get_pointer_at_cpu_address(&high_address_byte, 0xFFFF, READ);
 			program_counter = low_address_byte + (high_address_byte * 0x100);
 			cycles = 7;
 			break;
@@ -2160,8 +2342,10 @@ unsigned int run_opcode(unsigned char opcode)
 		push_to_stack(program_counter / 0x100);
 		push_to_stack(program_counter % 0x100);
 		push_to_stack((status_flags | 0b00100000) & 0b11101111);
-		unsigned char low_address_byte = *get_pointer_at_cpu_address(0xFFFA, READ);
-		unsigned char high_address_byte = *get_pointer_at_cpu_address(0xFFFB, READ);
+		unsigned char low_address_byte;
+		get_pointer_at_cpu_address(&low_address_byte, 0xFFFA, READ);
+		unsigned char high_address_byte;
+		get_pointer_at_cpu_address(&high_address_byte, 0xFFFB, READ);
 		program_counter = low_address_byte + (high_address_byte * 0x100);
 		cycles += 7;
 		pending_nmi = 0;
@@ -2172,10 +2356,9 @@ unsigned int run_opcode(unsigned char opcode)
 	{
 		for (int i = 0; i < 0x100; i++)
 		{
-			unsigned char load_byte = *get_pointer_at_cpu_address((oam_dma_page * 0x100) | i, READ);
-			ppu_bus = load_byte;
-			// Little bit of a hack to make sure the OAM address updates properly.
-			notify_ppu_write(0x2004);
+			unsigned char load_byte;
+			get_pointer_at_cpu_address(&load_byte, (oam_dma_page * 0x100) | i, READ);
+			get_pointer_at_cpu_address(&load_byte, 0x2004, WRITE);
 		}
 		// OAM DMA takes 513 cycles, +1 on odd cycles. I don't have any detection for odd cycles right now, so I won't worry about that.
 		cycles += 513;

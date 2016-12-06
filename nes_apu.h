@@ -15,8 +15,8 @@ extern unsigned char pulse_2_silence;
 extern unsigned char triangle_silence;
 extern unsigned char noise_silence;
 
-unsigned char* apu_read(unsigned int address);
-unsigned char* apu_write(unsigned int address);
+void apu_read(unsigned char* data, unsigned int address);
+void apu_write(unsigned char* data, unsigned int address);
 void apu_tick();
 void apu_init();
 

@@ -8,7 +8,7 @@
 #include "mappers/nrom00.h"
 #include "mappers/unrom02.h"
 
-typedef unsigned char* (*get_ptr_handler) (unsigned int, unsigned char);
+typedef void (*get_ptr_handler) (unsigned char*, unsigned int, unsigned char);
 typedef void (*mapper_init) (void);
 
 const int PRG_ROM_PAGE = 1024 * 16;
@@ -34,21 +34,21 @@ get_ptr_handler* mapper_prg_handlers;
 get_ptr_handler* mapper_chr_handlers;
 get_ptr_handler* mapper_nametable_handlers;
 
-unsigned char* get_pointer_at_prg_address(unsigned int address, unsigned char access_type)
+void get_pointer_at_prg_address(unsigned char* data, unsigned int address, unsigned char access_type)
 {
-	return mapper_prg_handlers[mapper](address, access_type);
+	return mapper_prg_handlers[mapper](data, address, access_type);
 }
 
-unsigned char* get_pointer_at_chr_address(unsigned int address, unsigned char access_type)
+void get_pointer_at_chr_address(unsigned char* data, unsigned int address, unsigned char access_type)
 {
-	return mapper_chr_handlers[mapper](address, access_type);
+	return mapper_chr_handlers[mapper](data, address, access_type);
 }
 
 // The cartridge has control over how the PPU accesses its RAM, normally controlling mirroring.
 // It could even alter it to point to cartridge RAM instead.
-unsigned char* get_pointer_at_nametable_address(unsigned int address, unsigned char access_type)
+void get_pointer_at_nametable_address(unsigned char* data, unsigned int address, unsigned char access_type)
 {
-	return mapper_nametable_handlers[mapper](address, access_type);
+	return mapper_nametable_handlers[mapper](data, address, access_type);
 }
 
 // Default stub for unimplemented mappers. Best to close gracefully rather than...do whatever

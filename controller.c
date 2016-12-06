@@ -18,42 +18,35 @@ unsigned char controller_2_pending_write;
 
 void controller_tick()
 {
-	if (controller_1_pending_write)
+	
+}
+
+void write_controller_state(unsigned char* data, unsigned int address)
+{
+	if (address == 0x4016)
 	{
+		controller_1_bus = *data;
 		if ((controller_1_bus & 0b1) == 0b1)
 		{
 			controller_1_shift = 0;
 		}
-		controller_1_pending_write = 0;
 	}
-	else if (controller_2_pending_write)
+	else if (address == 0x4017)
 	{
+		controller_2_bus = *data;
 		if ((controller_2_bus & 0b1) == 0b1)
 		{
 			controller_2_shift = 0;
 		}
-		controller_2_pending_write = 0;
+	}
+	else
+	{
+		printf("Controller access error: attempted to access nonexistent controller register %04X\n", address);
+		exit_emulator();
 	}
 }
 
-unsigned char* write_controller_state(unsigned int address)
-{
-	if (address == 0x4016)
-	{
-		controller_1_pending_write = 1;
-		return &controller_1_bus;
-	}
-	else if (address == 0x4017)
-	{
-		controller_2_pending_write = 1;
-		return &controller_2_bus;
-	}
-	printf("Controller access error: attempted to access nonexistent controller register %04X\n", address);
-	exit_emulator();
-	return NULL;
-}
-
-unsigned char* read_controller_state(unsigned int address)
+void read_controller_state(unsigned char* data, unsigned int address)
 {
 	if (address == 0x4016)
 	{
@@ -66,7 +59,7 @@ unsigned char* read_controller_state(unsigned int address)
 			controller_1_bus = (controller_1_data >> controller_1_shift) & 0b1;
 			controller_1_shift++;
 		}
-		return &controller_1_bus;
+		*data = controller_1_bus;
 	}
 	else if (address == 0x4017)
 	{
@@ -79,11 +72,13 @@ unsigned char* read_controller_state(unsigned int address)
 			controller_2_bus = (controller_2_data >> controller_2_shift) & 0b1;
 			controller_2_shift++;
 		}
-		return &controller_2_bus;
+		*data = controller_2_bus;
 	}
-	printf("Controller access error: attempted to access nonexistent controller register %04X\n", address);
-	exit_emulator();
-	return NULL;
+	else
+	{
+		printf("Controller access error: attempted to access nonexistent controller register %04X\n", address);
+		exit_emulator();
+	}
 }
 
 void controller_init()

@@ -170,7 +170,8 @@ void push_audio()
 
 void nes_loop()
 {
-	char opcode = *get_pointer_at_cpu_address(program_counter, READ);
+	unsigned char opcode;
+	get_pointer_at_cpu_address(&opcode, program_counter, READ);
 	unsigned int cycles = run_opcode(opcode);
 	
 	for (unsigned int i = 0; i < cycles; i++)
@@ -405,7 +406,9 @@ void handle_user_input()
 								printf("ROM DUMP\n");
 								for (int i = 0; i < 0x1000; i++)
 								{
-									printf("%04X: %02X\n", i, *get_pointer_at_cpu_address(i, READ));
+									unsigned char data;
+									get_pointer_at_cpu_address(&data, i, READ);
+									printf("%04X: %02X\n", i, data);
 								}
 								break;
 							}
@@ -414,7 +417,9 @@ void handle_user_input()
 								printf("NAMETABLE DUMP\n");
 								for (int i = 0x2000; i <= 0x2FFF; i++)
 								{
-									printf("%04X: %02X\n", i, *get_pointer_at_nametable_address(i, READ));
+									unsigned char data;
+									get_pointer_at_nametable_address(&data, i, READ);
+									printf("%04X: %02X\n", i, data);
 								}
 								break;
 							}
@@ -423,7 +428,9 @@ void handle_user_input()
 								printf("PATTERN TABLE DUMP\n");
 								for (int i = 0; i <= 0x1FFF; i++)
 								{
-									printf("%04X: %02X\n", i, *get_pointer_at_chr_address(i, READ));
+									unsigned char data;
+									get_pointer_at_chr_address(&data, i, READ);
+									printf("%04X: %02X\n", i, data);
 								}
 								break;
 							}

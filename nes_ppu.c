@@ -61,16 +61,16 @@ unsigned char reverse_byte(unsigned char byte)
    return byte;
 }
 
-unsigned char* get_pointer_at_ppu_address(unsigned int address, unsigned char access_type)
+void get_pointer_at_ppu_address(unsigned char* data, unsigned int address, unsigned char access_type)
 {
 	if (address <= 0x1FFF)
 	{
-		return get_pointer_at_chr_address(address, access_type);
+		get_pointer_at_chr_address(data, address, access_type);
 	}
 	else if (address >= 0x2000 && address <= 0x3EFF)
 	{
 		// Pass the address to the cartridge to handle mirroring and such.
-		return get_pointer_at_nametable_address(address, access_type);
+		get_pointer_at_nametable_address(data, address, access_type);
 	}
 	else if (address >= 0x3F00 && address <= 0x3FFF)
 	{
@@ -80,17 +80,23 @@ unsigned char* get_pointer_at_ppu_address(unsigned int address, unsigned char ac
 			address = address & 0b1111111111101111;
 		}
 		// Handle mirroring of 0x3F00 through 0x3F1F.
-		return &palette_ram[address & 0x1F];
+		if (access_type == READ)
+		{
+			*data = palette_ram[address & 0x1F];
+		}
+		else // access_type == WRITE
+		{
+			palette_ram[address & 0x1F] = *data;
+		}
 	}
 	else
 	{
 		printf("PPU address %04X out of range\n", address);
 		exit_emulator();
-		return NULL;
 	}
 }
 
-unsigned char* get_pointer_at_attribute_table_address(int address, unsigned char access_type)
+void get_pointer_at_attribute_table_address(unsigned char* data, int address, unsigned char access_type)
 {
 	// This is a bit tricky. The VRAM address is structured like this:
 	// yyy NN YYYYY XXXXX
@@ -99,7 +105,7 @@ unsigned char* get_pointer_at_attribute_table_address(int address, unsigned char
 	//     NN 1111 YYY XXX
 	// N for nametable select, Y for the high 3 bits of the coarse Y-scroll, X for the high 3 bits of the coarse X-scroll.
 	// We want to strip out yyy, keep NN, set the next 4 bits to 1, set the top 3 Y bits shifted down by 4, set the top 3 X bits shifted down by 2.
-	return get_pointer_at_ppu_address(0x23C0 | (address & 0b110000000000) | ((address >> 4) & 0b111000) | ((address >> 2) & 0b111), access_type);
+	get_pointer_at_ppu_address(data, 0x23C0 | (address & 0b110000000000) | ((address >> 4) & 0b111000) | ((address >> 2) & 0b111), access_type);
 }
 
 // Notifies the PPU that the CPU accessed the PPU bus.
@@ -107,60 +113,167 @@ unsigned char* get_pointer_at_attribute_table_address(int address, unsigned char
 // If the PPU needs to read, it should save the register address
 // to register_accessed and look at it during ppu_tick so the CPU
 // has time to write to the PPU bus.
-void notify_ppu(unsigned int ppu_register, unsigned char access_type)
+void access_ppu_register(unsigned char* data, unsigned int ppu_register, unsigned char access_type)
 {
-	switch(ppu_register)
+	if (access_type == READ)
 	{
-		// PPUSTATUS
-		case 0x2002:
+		switch(ppu_register)
 		{
-			if (access_type == READ)
+			// PPUSTATUS
+			case 0x2002:
 			{
-				write_toggle = 0;
-				ppu_bus = ppu_status;
-				// Clear the vblank flag after PPUSTATUS read.
-				ppu_status = ppu_status & 0b01111111;
-				nmi_occurred = nmi_occurred & 0b10;
-			}
-			break;
-		}
-		// OAMADDR
-		case 0x2003:
-		{
-			ppu_bus = oam_address;
-			register_accessed = ppu_register;
-			break;
-		}
-		// OAMDATA
-		case 0x2004:
-		{
-			ppu_bus = oam[oam_address];
-			if (access_type == WRITE)
-			{
-				register_accessed = ppu_register;
-			}
-			break;
-		}
-		// PPUDATA
-		case 0x2007:
-		{
-			if (access_type == READ)
-			{
-				// Reading PPUDATA works via an utterly bizarre scheme in which the data
-				// actually read is from a buffer that is updated with the latest value only
-				// after the read. Except for palettes, which are read directly, except
-				// the buffer is still updated, but with the nametable byte that /would/
-				// be there if the address wasn't a palette.
-				if (vram_address <= 0x3EFF)
+				if (access_type == READ)
 				{
-					ppu_bus = ppu_data_buffer;
+					write_toggle = 0;
+					ppu_bus = ppu_status;
+					// Clear the vblank flag after PPUSTATUS read.
+					ppu_status = ppu_status & 0b01111111;
+					nmi_occurred = nmi_occurred & 0b10;
+				}
+				break;
+			}
+			// OAMADDR
+			case 0x2003:
+			{
+				ppu_bus = oam_address;
+				register_accessed = ppu_register;
+				break;
+			}
+			// OAMDATA
+			case 0x2004:
+			{
+				ppu_bus = oam[oam_address];
+				if (access_type == WRITE)
+				{
+					register_accessed = ppu_register;
+				}
+				break;
+			}
+			// PPUDATA
+			case 0x2007:
+			{
+				if (access_type == READ)
+				{
+					// Reading PPUDATA works via an utterly bizarre scheme in which the data
+					// actually read is from a buffer that is updated with the latest value only
+					// after the read. Except for palettes, which are read directly, except
+					// the buffer is still updated, but with the nametable byte that /would/
+					// be there if the address wasn't a palette.
+					if (vram_address <= 0x3EFF)
+					{
+						ppu_bus = ppu_data_buffer;
+					}
+					else
+					{
+						get_pointer_at_ppu_address(&ppu_bus, vram_address, READ);
+					}
+					get_pointer_at_ppu_address(&ppu_data_buffer, vram_address, READ);
+					
+					// Check VRAM address increment flag
+					if ((ppu_control & 0b00000100) == 0b00000100)
+					{
+						vram_address += 32;
+					}
+					else
+					{
+						vram_address++;
+					}
 				}
 				else
 				{
-					ppu_bus = *get_pointer_at_ppu_address(vram_address, READ);
+					register_accessed = ppu_register;
 				}
-				ppu_data_buffer = *get_pointer_at_ppu_address(vram_address, READ);
-				
+				break;
+			}
+			default:
+			{
+				register_accessed = ppu_register;
+				break;
+			}
+		}
+		*data = ppu_bus;
+	}
+	else // access_type == WRITE
+	{
+		ppu_bus = *data;
+		switch(ppu_register)
+		{
+			// PPUCTRL
+			case 0x2000:
+			{
+				ppu_control = ppu_bus;
+				// Set the nametable select bits to the temp vram address.
+				vram_temp = (vram_temp & 0b1111001111111111) | ((ppu_control & 0b11) << 10);
+				// Track current state of nmi output on its low bit.
+				if ((ppu_control & 0b10000000) == 0b10000000)
+				{
+					nmi_output = nmi_output | 0b01;
+				}
+				else
+				{
+					nmi_output = nmi_output & 0b10;
+				}
+				break;
+			}
+			// PPUMASK
+			case 0x2001:
+			{
+				ppu_mask = ppu_bus;
+				break;
+			}
+			// OAMADDR
+			case 0x2003:
+			{
+				oam_address = ppu_bus;
+				break;
+			}
+			// OAMDATA
+			case 0x2004:
+			{
+				oam[oam_address] = ppu_bus;
+				oam_address++;
+				break;
+			}
+			// PPUSCROLL
+			case 0x2005:
+			{
+				if (write_toggle) // == 1
+				{
+					// Write to the Y-scroll.
+					vram_temp = (vram_temp & 0b000110000011111) | ((ppu_bus & 0b111) << 12) | ((ppu_bus & 0b11111000) << 2);
+					write_toggle = 0;
+				}
+				else
+				{
+					// Write to the X-scroll.
+					fine_x_scroll = ppu_bus & 0b111;
+					vram_temp = (vram_temp & 0b1111111111100000) | ((ppu_bus >> 3) & 0b11111);
+					write_toggle = 1;
+				}
+				break;
+			}
+			// PPUADDR
+			case 0x2006:
+			{
+				if (write_toggle) // == 1
+				{
+					// Write the ppu bus data to the low byte.
+					vram_temp = (vram_temp & 0xFF00) | ppu_bus;
+					vram_address = vram_temp;
+					write_toggle = 0;
+				}
+				else
+				{
+					// Write the ppu bus data to the high byte.
+					vram_temp = (vram_temp & 0x00FF) | (ppu_bus * 0x100);
+					write_toggle = 1;
+				}
+				break;
+			}
+			// PPUDATA
+			case 0x2007:
+			{
+				get_pointer_at_ppu_address(&ppu_bus, vram_address, WRITE);
 				// Check VRAM address increment flag
 				if ((ppu_control & 0b00000100) == 0b00000100)
 				{
@@ -170,115 +283,11 @@ void notify_ppu(unsigned int ppu_register, unsigned char access_type)
 				{
 					vram_address++;
 				}
+				break;
 			}
-			else
-			{
-				register_accessed = ppu_register;
-			}
-			break;
 		}
-		default:
-		{
-			register_accessed = ppu_register;
-			break;
-		}
+		register_accessed = 0;
 	}
-}
-
-void notify_ppu_write(unsigned int ppu_register)
-{
-	switch(ppu_register)
-	{
-		// PPUCTRL
-		case 0x2000:
-		{
-			ppu_control = ppu_bus;
-			// Set the nametable select bits to the temp vram address.
-			vram_temp = (vram_temp & 0b1111001111111111) | ((ppu_control & 0b11) << 10);
-			// Track current state of nmi output on its low bit.
-			if ((ppu_control & 0b10000000) == 0b10000000)
-			{
-				nmi_output = nmi_output | 0b01;
-			}
-			else
-			{
-				nmi_output = nmi_output & 0b10;
-			}
-			break;
-		}
-		// PPUMASK
-		case 0x2001:
-		{
-			ppu_mask = ppu_bus;
-			break;
-		}
-		// OAMADDR
-		case 0x2003:
-		{
-			oam_address = ppu_bus;
-			break;
-		}
-		// OAMDATA
-		case 0x2004:
-		{
-			oam[oam_address] = ppu_bus;
-			oam_address++;
-			break;
-		}
-		// PPUSCROLL
-		case 0x2005:
-		{
-			if (write_toggle) // == 1
-			{
-				// Write to the Y-scroll.
-				vram_temp = (vram_temp & 0b000110000011111) | ((ppu_bus & 0b111) << 12) | ((ppu_bus & 0b11111000) << 2);
-				write_toggle = 0;
-			}
-			else
-			{
-				// Write to the X-scroll.
-				fine_x_scroll = ppu_bus & 0b111;
-				vram_temp = (vram_temp & 0b1111111111100000) | ((ppu_bus >> 3) & 0b11111);
-				write_toggle = 1;
-			}
-			break;
-		}
-		// PPUADDR
-		case 0x2006:
-		{
-			if (write_toggle) // == 1
-			{
-				// Write the ppu bus data to the low byte.
-				vram_temp = (vram_temp & 0xFF00) | ppu_bus;
-				vram_address = vram_temp;
-				write_toggle = 0;
-			}
-			else
-			{
-				// Write the ppu bus data to the high byte.
-				vram_temp = (vram_temp & 0x00FF) | (ppu_bus * 0x100);
-				write_toggle = 1;
-			}
-			break;
-		}
-		// PPUDATA
-		case 0x2007:
-		{
-			unsigned char* address_byte = get_pointer_at_ppu_address(vram_address, WRITE);
-			*address_byte = ppu_bus;
-			// Check VRAM address increment flag
-			if ((ppu_control & 0b00000100) == 0b00000100)
-			{
-				vram_address += 32;
-			}
-			else
-			{
-				vram_address++;
-			}
-			break;
-		}
-	}
-	register_accessed = 0;
 }
 
 // Increments the coarse X-scroll in VRAM.
@@ -324,7 +333,8 @@ void reset_vram_vert()
 void load_render_registers()
 {
 	unsigned fine_y_scroll = (vram_address >> 12) & 0b111;
-	unsigned char pattern_byte = *get_pointer_at_nametable_address(vram_address & 0b111111111111, READ);
+	unsigned char pattern_byte;
+	get_pointer_at_nametable_address(&pattern_byte, vram_address & 0b111111111111, READ);
 	// An address in the pattern table is encoded thus:
 	// 0HRRRR CCCCPTTT
 	// H is which half of the sprite table.
@@ -333,10 +343,15 @@ void load_render_registers()
 	// It seems that the part stored in the nametable is RRRR CCCC, indicating the tile row and column.
 	unsigned int pattern_address = ((ppu_control & 0b10000) << 8) | (pattern_byte * 0b10000) | fine_y_scroll;
 	// Write the low byte from the pattern table to the low byte of the low bitmap register.
-	bitmap_register_low = (bitmap_register_low & 0xFF00) | *get_pointer_at_ppu_address(pattern_address, READ);
+	unsigned char low_pattern_data;
+	get_pointer_at_ppu_address(&low_pattern_data, pattern_address, READ);
+	bitmap_register_low = (bitmap_register_low & 0xFF00) | low_pattern_data;
 	// Write the high byte from the pattern table to the low byte of the high bitmap register.
-	bitmap_register_high = (bitmap_register_high & 0xFF00) | *get_pointer_at_ppu_address(pattern_address | 0b1000, READ);
-	unsigned char attribute_byte = *get_pointer_at_attribute_table_address(vram_address & 0b111111111111, READ);
+	unsigned char high_pattern_data;
+	get_pointer_at_ppu_address(&high_pattern_data, pattern_address | 0b1000, READ);
+	bitmap_register_high = (bitmap_register_high & 0xFF00) | high_pattern_data;
+	unsigned char attribute_byte;
+	get_pointer_at_attribute_table_address(&attribute_byte, vram_address & 0b111111111111, READ);
 	unsigned char attribute_tile_select = ((vram_address >> 1) & 0b1) + ((vram_address >> 5) & 0b10);
 	palette_latch = (attribute_byte >> (attribute_tile_select * 2)) & 0b11;
 	
@@ -422,8 +437,10 @@ void load_sprites()
 		// TTT is the fine y offset. We get that from which scanline is being drawn.
 		// RRRR indicates row, and CCCC indicates column.
 		unsigned int pattern_address = (pattern_table_select << 12) | (tile_number << 4) | fine_y;
-		unsigned char sprite_bitmap_low = *get_pointer_at_ppu_address(pattern_address, READ);
-		unsigned char sprite_bitmap_high = *get_pointer_at_ppu_address(pattern_address | 0b1000, READ);
+		unsigned char sprite_bitmap_low;
+		get_pointer_at_ppu_address(&sprite_bitmap_low, pattern_address, READ);
+		unsigned char sprite_bitmap_high;
+		get_pointer_at_ppu_address(&sprite_bitmap_high, pattern_address | 0b1000, READ);
 		
 		// Check for horizontal flip attribute.
 		if ((sprite_attribute_byte & 0b1000000) == 0b1000000)
@@ -442,9 +459,7 @@ void load_sprites()
 // This will probably have to be made a bit more complex as more parts of the PPU are implemented.
 unsigned char ppu_tick()
 {
-	unsigned pixel_data = 255;
-	
-	notify_ppu_write(register_accessed);
+	unsigned char pixel_data = 255;
 	
 	unsigned char render_disable = (ppu_mask & 0b00011000) == 0;
 	unsigned char background_enable = (ppu_mask & 0b1000) == 0b1000;
@@ -517,7 +532,8 @@ unsigned char ppu_tick()
 						| (((palette_register_low >> fixed_fine_x_scroll) << 2) & 0b100)
 						| (((palette_register_high >> fixed_fine_x_scroll) << 3) & 0b1000);
 				}
-				unsigned char background_pixel = *get_pointer_at_ppu_address(0x3F00 + palette_address, READ);
+				unsigned char background_pixel;
+				get_pointer_at_ppu_address(&background_pixel, 0x3F00 + palette_address, READ);
 				if (background_enable)
 				{
 					pixel_data = background_pixel;
@@ -555,7 +571,7 @@ unsigned char ppu_tick()
 								else
 								{
 									sprite_palette = sprite_palette | ((sprite_attributes[i] & 0b11) << 2);
-									pixel_data = *get_pointer_at_ppu_address(0x3F10 + sprite_palette, READ);
+									get_pointer_at_ppu_address(&pixel_data, 0x3F10 + sprite_palette, READ);
 								}
 							}
 							sprite_bitmaps_low[i] = (sprite_bitmaps_low[i] << 1) & 0xFF;

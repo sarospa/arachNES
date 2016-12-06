@@ -105,7 +105,7 @@ unsigned char pulse_2_silence;
 unsigned char triangle_silence;
 unsigned char noise_silence;
 
-unsigned char* apu_write(unsigned int address)
+void apu_write(unsigned char* data, unsigned int address)
 {
 	apu_register_accessed = address;
 	access_type = WRITE;
@@ -113,120 +113,123 @@ unsigned char* apu_write(unsigned int address)
 	{
 		case 0x4000:
 		{
-			return &pulse_1_control;
+			pulse_1_control = *data;
 			break;
 		}
 		case 0x4001:
 		{
 			pulse_1_sweep_reload = 1;
-			return &pulse_1_sweep;
+			pulse_1_sweep = *data;
 			break;
 		}
 		case 0x4002:
 		{
-			return &pulse_1_timer_low;
+			pulse_1_timer_low = *data;
 			break;
 		}
 		case 0x4003:
 		{
 			pulse_1_envelope_start = 1;
-			return &pulse_1_timer_high;
+			pulse_1_timer_high = *data;
+			pulse_1_length_counter = length_table[(pulse_1_timer_high & 0b11111000) >> 3];
 			break;
 		}
 		case 0x4004:
 		{
-			return &pulse_2_control;
+			pulse_2_control = *data;
 			break;
 		}
 		case 0x4005:
 		{
 			pulse_2_sweep_reload = 1;
-			return &pulse_2_sweep;
+			pulse_2_sweep = *data;
 			break;
 		}
 		case 0x4006:
 		{
-			return &pulse_2_timer_low;
+			pulse_2_timer_low = *data;
 			break;
 		}
 		case 0x4007:
 		{
 			pulse_2_envelope_start = 1;
-			return &pulse_2_timer_high;
+			pulse_2_timer_high = *data;
 			break;
 		}
 		case 0x4008:
 		{
-			return &triangle_linear_control;
+			triangle_linear_control = *data;
 			break;
 		}
 		case 0x400A:
 		{
-			return &triangle_timer_low;
+			triangle_timer_low = *data;
 			break;
 		}
 		case 0x400B:
 		{
 			triangle_linear_reload = 1;
-			return &triangle_timer_high;
+			triangle_timer_high = *data;
 			break;
 		}
 		case 0x400C:
 		{
-			return &noise_control;
+			noise_control = *data;
 			break;
 		}
 		case 0x400E:
 		{
-			return &noise_period_control;
+			noise_period_control = *data;
 			break;
 		}
 		case 0x400F:
 		{
 			noise_envelope_start = 1;
-			return &noise_length_counter_load;
+			noise_length_counter_load = *data;
 			break;
 		}
 		case 0x4010:
 		{
-			return &dummy;
 			break;
 		}
 		case 0x4011:
 		{
-			return &dummy;
 			break;
 		}
 		case 0x4012:
 		{
-			return &dummy;
 			break;
 		}
 		case 0x4013:
 		{
-			return &dummy;
 			break;
 		}
 		case 0x4015:
 		{
-			return &apu_status;
+			apu_status = *data;
 			break;
 		}
 		case 0x4017:
 		{
-			return &apu_frame_settings;
+			apu_frame_settings = *data;
+			break;
+		}
+		// Unused registers. Is any value stored here?
+		// Not sure. Seems simpler to do nothing.
+		case 0x4009:
+		case 0x400D:
+		{
 			break;
 		}
 		default:
 		{
 			printf("Unhandled APU register %04X\n", address);
 			exit_emulator();
-			return NULL;
 		}
 	}
 }
 
-unsigned char* apu_read(unsigned int address)
+void apu_read(unsigned char* data, unsigned int address)
 {
 	apu_register_accessed = address;
 	access_type = READ;
@@ -234,109 +237,111 @@ unsigned char* apu_read(unsigned int address)
 	{
 		case 0x4000:
 		{
-			return &pulse_1_control;
+			*data = pulse_1_control;
 			break;
 		}
 		case 0x4001:
 		{
-			return &pulse_1_sweep;
+			*data = pulse_1_sweep;
 			break;
 		}
 		case 0x4002:
 		{
-			return &pulse_1_timer_low;
+			*data = pulse_1_timer_low;
 			break;
 		}
 		case 0x4003:
 		{
-			return &pulse_1_timer_high;
+			*data = pulse_1_timer_high;
 			break;
 		}
 		case 0x4004:
 		{
-			return &pulse_2_control;
+			*data = pulse_2_control;
 			break;
 		}
 		case 0x4005:
 		{
-			return &pulse_2_sweep;
+			*data = pulse_2_sweep;
 			break;
 		}
 		case 0x4006:
 		{
-			return &pulse_2_timer_low;
+			*data = pulse_2_timer_low;
 			break;
 		}
 		case 0x4007:
 		{
-			return &pulse_2_timer_high;
+			*data = pulse_2_timer_high;
 			break;
 		}
 		case 0x4008:
 		{
-			return &triangle_linear_control;
+			*data = triangle_linear_control;
 			break;
 		}
 		case 0x400A:
 		{
-			return &triangle_timer_low;
+			*data = triangle_timer_low;
 			break;
 		}
 		case 0x400B:
 		{
-			return &triangle_timer_high;
+			*data = triangle_timer_high;
 			break;
 		}
 		case 0x400C:
 		{
-			return &noise_control;
+			*data = noise_control;
 			break;
 		}
 		case 0x400E:
 		{
-			return &noise_period_control;
+			*data = noise_period_control;
 			break;
 		}
 		case 0x400F:
 		{
-			return &noise_length_counter_load;
+			*data = noise_length_counter_load;
 			break;
 		}
 		case 0x4010:
 		{
-			return &dummy;
 			break;
 		}
 		case 0x4011:
 		{
-			return &dummy;
 			break;
 		}
 		case 0x4012:
 		{
-			return &dummy;
 			break;
 		}
 		case 0x4013:
 		{
-			return &dummy;
 			break;
 		}
 		case 0x4015:
 		{
-			return &apu_status;
+			*data = apu_status;
 			break;
 		}
 		case 0x4017:
 		{
-			return &apu_frame_settings;
+			*data = apu_frame_settings;
+			break;
+		}
+		// Unused registers. Is any value stored here?
+		// Not sure. Seems simpler to do nothing.
+		case 0x4009:
+		case 0x400D:
+		{
 			break;
 		}
 		default:
 		{
 			printf("Unhandled APU register %04X\n", address);
 			exit_emulator();
-			return NULL;
 		}
 	}
 }
