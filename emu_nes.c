@@ -107,6 +107,13 @@ void audio_callback(void* userdata, Uint8* stream, int len)
 // Currently downsampling by averaging each group of samples.
 void push_audio()
 {
+	// Nothing to do if there's no APU samples, and also we don't
+	// want to divide by zero.
+	if (apu_buffer_length == 0)
+	{
+		return;
+	}
+	
 	float index;
 	// The plus 15 is a little bit magic? I don't want to touch it.
 	samples_this_frame += current_samples_per_frame + 15;
@@ -179,8 +186,6 @@ void nes_loop()
 		apu_tick();
 	}
 	
-	controller_tick();
-	
 	// PPU runs at triple the speed of the CPU.
 	// Call PPU tick three times for every CPU cycle.
 	for (unsigned int i = 0; i < (cycles * 3); i++)
@@ -191,6 +196,36 @@ void nes_loop()
 			render_buffer[render_buffer_count] = pixel_data;
 			render_buffer_count++;
 		}
+	}
+}
+
+void save_state()
+{
+	FILE* save_state = fopen("arachNES_save_state", "wb");
+	if (save_state != NULL)
+	{
+		cpu_save_state(save_state);
+		ppu_save_state(save_state);
+		apu_save_state(save_state);
+		controller_save_state(save_state);
+		fclose(save_state);
+	}
+}
+
+void load_state()
+{
+	FILE* save_state = fopen("arachNES_save_state", "rb");
+	if (save_state != NULL)
+	{
+		cpu_load_state(save_state);
+		ppu_load_state(save_state);
+		apu_load_state(save_state);
+		controller_load_state(save_state);
+		fclose(save_state);
+		audio_buffer_writer = 0;
+		audio_buffer_reader = 0;
+		audio_buffer_last_value = 128;
+
 	}
 }
 
@@ -350,6 +385,16 @@ void handle_user_input()
 							controller_1_data = controller_1_data & 0b01111111;
 							break;
 						}
+						case SDL_CONTROLLER_BUTTON_LEFTSHOULDER:
+						{
+							save_state();
+							break;
+						}
+						case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER:
+						{
+							load_state();
+							break;
+						}
 					}
 					break;
 				}
@@ -398,6 +443,17 @@ void handle_user_input()
 							case SDL_SCANCODE_RIGHT:
 							{
 								controller_1_data = controller_1_data | 0b10000000;
+								break;
+							}
+							// Savestate
+							case SDL_SCANCODE_F1:
+							{
+								save_state();
+								break;
+							}
+							case SDL_SCANCODE_F2:
+							{
+								load_state();
 								break;
 							}
 							// debug hotkeys

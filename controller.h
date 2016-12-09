@@ -11,4 +11,7 @@ void controller_tick();
 void write_controller_state(unsigned char* data, unsigned int address);
 void read_controller_state(unsigned char* data, unsigned int address);
 
+void controller_save_state(FILE* save_file);
+void controller_load_state(FILE* save_file);
+
 #endif

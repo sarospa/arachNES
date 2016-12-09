@@ -20,4 +20,7 @@ void apu_write(unsigned char* data, unsigned int address);
 void apu_tick();
 void apu_init();
 
+void apu_save_state(FILE* save_file);
+void apu_load_state(FILE* save_file);
+
 #endif

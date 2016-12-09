@@ -17,4 +17,7 @@ void ppu_init();
 void access_ppu_register(unsigned char* data, unsigned int ppu_register, unsigned char access_type);
 unsigned char ppu_tick();
 
+void ppu_save_state(FILE* save_file);
+void ppu_load_state(FILE* save_file);
+
 #endif

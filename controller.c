@@ -13,12 +13,24 @@ unsigned char controller_2_shift;
 unsigned char controller_1_data;
 unsigned char controller_2_data;
 
-unsigned char controller_1_pending_write;
-unsigned char controller_2_pending_write;
-
-void controller_tick()
+void controller_save_state(FILE* save_file)
 {
-	
+	fwrite(&controller_1_bus, sizeof(char), 1, save_file);
+	fwrite(&controller_2_bus, sizeof(char), 1, save_file);
+	fwrite(&controller_1_shift, sizeof(char), 1, save_file);
+	fwrite(&controller_2_shift, sizeof(char), 1, save_file);
+	fwrite(&controller_1_data, sizeof(char), 1, save_file);
+	fwrite(&controller_2_data, sizeof(char), 1, save_file);
+}
+
+void controller_load_state(FILE* save_file)
+{
+	fread(&controller_1_bus, sizeof(char), 1, save_file);
+	fread(&controller_2_bus, sizeof(char), 1, save_file);
+	fread(&controller_1_shift, sizeof(char), 1, save_file);
+	fread(&controller_2_shift, sizeof(char), 1, save_file);
+	fread(&controller_1_data, sizeof(char), 1, save_file);
+	fread(&controller_2_data, sizeof(char), 1, save_file);
 }
 
 void write_controller_state(unsigned char* data, unsigned int address)
@@ -91,7 +103,4 @@ void controller_init()
 	
 	controller_1_data = 0;
 	controller_2_data = 0;
-	
-	controller_1_pending_write = 0;
-	controller_2_pending_write = 0;
 }

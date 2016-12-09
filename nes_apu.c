@@ -91,13 +91,7 @@ const unsigned char duty_size = 8;
 
 float* mixer_buffer;
 unsigned int apu_buffer_length;
-unsigned const int apu_buffer_max = 0x10000;
-
-unsigned int apu_register_accessed;
-unsigned char access_type;
-
-// Return this for registers we haven't implemented yet.
-unsigned char dummy;
+unsigned const int APU_BUFFER_MAX = 0x10000;
 
 // Flags to let the user control which channels are played.
 unsigned char pulse_1_silence;
@@ -107,8 +101,6 @@ unsigned char noise_silence;
 
 void apu_write(unsigned char* data, unsigned int address)
 {
-	apu_register_accessed = address;
-	access_type = WRITE;
 	switch(address)
 	{
 		case 0x4000:
@@ -154,6 +146,7 @@ void apu_write(unsigned char* data, unsigned int address)
 		{
 			pulse_2_envelope_start = 1;
 			pulse_2_timer_high = *data;
+			pulse_2_length_counter = length_table[(pulse_2_timer_high & 0b11111000) >> 3];
 			break;
 		}
 		case 0x4008:
@@ -170,6 +163,7 @@ void apu_write(unsigned char* data, unsigned int address)
 		{
 			triangle_linear_reload = 1;
 			triangle_timer_high = *data;
+			triangle_length_counter = length_table[(triangle_timer_high & 0b11111000) >> 3];
 			break;
 		}
 		case 0x400C:
@@ -186,6 +180,7 @@ void apu_write(unsigned char* data, unsigned int address)
 		{
 			noise_envelope_start = 1;
 			noise_length_counter_load = *data;
+			noise_length_counter = length_table[(noise_length_counter_load & 0b11111000) >> 3];
 			break;
 		}
 		case 0x4010:
@@ -231,8 +226,6 @@ void apu_write(unsigned char* data, unsigned int address)
 
 void apu_read(unsigned char* data, unsigned int address)
 {
-	apu_register_accessed = address;
-	access_type = READ;
 	switch(address)
 	{
 		case 0x4000:
@@ -344,6 +337,118 @@ void apu_read(unsigned char* data, unsigned int address)
 			exit_emulator();
 		}
 	}
+}
+
+void apu_save_state(FILE* save_file)
+{
+	fwrite(&apu_half_clock_count, sizeof(int), 1, save_file);
+	fwrite(&apu_status, sizeof(char), 1, save_file);
+	fwrite(&apu_frame_settings, sizeof(char), 1, save_file);
+	
+	fwrite(&pulse_1_control, sizeof(char), 1, save_file);
+	fwrite(&pulse_1_sweep, sizeof(char), 1, save_file);
+	fwrite(&pulse_1_timer_low, sizeof(char), 1, save_file);
+	fwrite(&pulse_1_timer_high, sizeof(char), 1, save_file);
+	fwrite(&pulse_1_timer_count, sizeof(int), 1, save_file);
+	fwrite(&pulse_1_duty_index, sizeof(char), 1, save_file);
+	fwrite(&pulse_1_length_counter, sizeof(char), 1, save_file);
+	fwrite(&pulse_1_sweep_divider, sizeof(char), 1, save_file);
+	fwrite(&pulse_1_sweep_reload, sizeof(char), 1, save_file);
+	fwrite(&pulse_1_target_period, sizeof(int), 1, save_file);
+	fwrite(&pulse_1_envelope_start, sizeof(char), 1, save_file);
+	fwrite(&pulse_1_envelope_divider, sizeof(char), 1, save_file);
+	fwrite(&pulse_1_envelope_decay, sizeof(char), 1, save_file);
+	
+	fwrite(&pulse_2_control, sizeof(char), 1, save_file);
+	fwrite(&pulse_2_sweep, sizeof(char), 1, save_file);
+	fwrite(&pulse_2_timer_low, sizeof(char), 1, save_file);
+	fwrite(&pulse_2_timer_high, sizeof(char), 1, save_file);
+	fwrite(&pulse_2_timer_count, sizeof(int), 1, save_file);
+	fwrite(&pulse_2_duty_index, sizeof(char), 1, save_file);
+	fwrite(&pulse_2_length_counter, sizeof(char), 1, save_file);
+	fwrite(&pulse_2_sweep_divider, sizeof(char), 1, save_file);
+	fwrite(&pulse_2_sweep_reload, sizeof(char), 1, save_file);
+	fwrite(&pulse_2_target_period, sizeof(int), 1, save_file);
+	fwrite(&pulse_2_envelope_start, sizeof(char), 1, save_file);
+	fwrite(&pulse_2_envelope_divider, sizeof(char), 1, save_file);
+	fwrite(&pulse_2_envelope_decay, sizeof(char), 1, save_file);
+	
+	fwrite(&triangle_linear_control, sizeof(char), 1, save_file);
+	fwrite(&triangle_timer_low, sizeof(char), 1, save_file);
+	fwrite(&triangle_timer_high, sizeof(char), 1, save_file);
+	fwrite(&triangle_timer_count, sizeof(int), 1, save_file);
+	fwrite(&triangle_linear_reload, sizeof(char), 1, save_file);
+	fwrite(&triangle_linear_counter, sizeof(char), 1, save_file);
+	fwrite(&triangle_length_counter, sizeof(char), 1, save_file);
+	
+	fwrite(&noise_control, sizeof(char), 1, save_file);
+	fwrite(&noise_period_control, sizeof(char), 1, save_file);
+	fwrite(&noise_length_counter_load, sizeof(char), 1, save_file);
+	fwrite(&noise_timer_count, sizeof(int), 1, save_file);
+	fwrite(&noise_bit_stream, sizeof(int), 1, save_file);
+	fwrite(&noise_length_counter, sizeof(char), 1, save_file);
+	fwrite(&noise_envelope_start, sizeof(char), 1, save_file);
+	fwrite(&noise_envelope_divider, sizeof(char), 1, save_file);
+	fwrite(&noise_envelope_decay, sizeof(char), 1, save_file);
+	
+	fwrite(&sequencer_index, sizeof(char), 1, save_file);
+}
+
+void apu_load_state(FILE* save_file)
+{
+	fread(&apu_half_clock_count, sizeof(int), 1, save_file);
+	fread(&apu_status, sizeof(char), 1, save_file);
+	fread(&apu_frame_settings, sizeof(char), 1, save_file);
+	
+	fread(&pulse_1_control, sizeof(char), 1, save_file);
+	fread(&pulse_1_sweep, sizeof(char), 1, save_file);
+	fread(&pulse_1_timer_low, sizeof(char), 1, save_file);
+	fread(&pulse_1_timer_high, sizeof(char), 1, save_file);
+	fread(&pulse_1_timer_count, sizeof(int), 1, save_file);
+	fread(&pulse_1_duty_index, sizeof(char), 1, save_file);
+	fread(&pulse_1_length_counter, sizeof(char), 1, save_file);
+	fread(&pulse_1_sweep_divider, sizeof(char), 1, save_file);
+	fread(&pulse_1_sweep_reload, sizeof(char), 1, save_file);
+	fread(&pulse_1_target_period, sizeof(int), 1, save_file);
+	fread(&pulse_1_envelope_start, sizeof(char), 1, save_file);
+	fread(&pulse_1_envelope_divider, sizeof(char), 1, save_file);
+	fread(&pulse_1_envelope_decay, sizeof(char), 1, save_file);
+	
+	fread(&pulse_2_control, sizeof(char), 1, save_file);
+	fread(&pulse_2_sweep, sizeof(char), 1, save_file);
+	fread(&pulse_2_timer_low, sizeof(char), 1, save_file);
+	fread(&pulse_2_timer_high, sizeof(char), 1, save_file);
+	fread(&pulse_2_timer_count, sizeof(int), 1, save_file);
+	fread(&pulse_2_duty_index, sizeof(char), 1, save_file);
+	fread(&pulse_2_length_counter, sizeof(char), 1, save_file);
+	fread(&pulse_2_sweep_divider, sizeof(char), 1, save_file);
+	fread(&pulse_2_sweep_reload, sizeof(char), 1, save_file);
+	fread(&pulse_2_target_period, sizeof(int), 1, save_file);
+	fread(&pulse_2_envelope_start, sizeof(char), 1, save_file);
+	fread(&pulse_2_envelope_divider, sizeof(char), 1, save_file);
+	fread(&pulse_2_envelope_decay, sizeof(char), 1, save_file);
+	
+	fread(&triangle_linear_control, sizeof(char), 1, save_file);
+	fread(&triangle_timer_low, sizeof(char), 1, save_file);
+	fread(&triangle_timer_high, sizeof(char), 1, save_file);
+	fread(&triangle_timer_count, sizeof(int), 1, save_file);
+	fread(&triangle_linear_reload, sizeof(char), 1, save_file);
+	fread(&triangle_linear_counter, sizeof(char), 1, save_file);
+	fread(&triangle_length_counter, sizeof(char), 1, save_file);
+	
+	fread(&noise_control, sizeof(char), 1, save_file);
+	fread(&noise_period_control, sizeof(char), 1, save_file);
+	fread(&noise_length_counter_load, sizeof(char), 1, save_file);
+	fread(&noise_timer_count, sizeof(int), 1, save_file);
+	fread(&noise_bit_stream, sizeof(int), 1, save_file);
+	fread(&noise_length_counter, sizeof(char), 1, save_file);
+	fread(&noise_envelope_start, sizeof(char), 1, save_file);
+	fread(&noise_envelope_divider, sizeof(char), 1, save_file);
+	fread(&noise_envelope_decay, sizeof(char), 1, save_file);
+	
+	fread(&sequencer_index, sizeof(char), 1, save_file);
+	
+	apu_buffer_length = 0;
 }
 
 // Handles the sweep algorithm that manipulates the frequency of the pulse channels.
@@ -586,7 +691,7 @@ void half_frame_clock()
 
 void mix_audio()
 {
-	if (apu_buffer_length >= apu_buffer_max)
+	if (apu_buffer_length >= APU_BUFFER_MAX)
 	{
 		return;
 	}
@@ -661,47 +766,6 @@ void mix_audio()
 // Linear counters count down every quarter frame. Length counters count down every half frame.
 void apu_tick()
 {
-	switch(apu_register_accessed)
-	{
-		case 0x4003:
-		{
-			if (access_type == WRITE)
-			{
-				// Reload the length counter with the value from the APU's length lookup table.
-				pulse_1_length_counter = length_table[(pulse_1_timer_high & 0b11111000) >> 3];
-			}
-			break;
-		}
-		case 0x4007:
-		{
-			if (access_type == WRITE)
-			{
-				// Reload the length counter with the value from the APU's length lookup table.
-				pulse_2_length_counter = length_table[(pulse_2_timer_high & 0b11111000) >> 3];
-			}
-			break;
-		}
-		case 0x400B:
-		{
-			if (access_type == WRITE)
-			{
-				// Reload the length counter with the value from the APU's length lookup table.
-				triangle_length_counter = length_table[(triangle_timer_high & 0b11111000) >> 3];
-			}
-			break;
-		}
-		case 0x400F:
-		{
-			if (access_type == WRITE)
-			{
-				// Reload the length counter with the value from the APU's length lookup table.
-				noise_length_counter = length_table[(noise_length_counter_load & 0b11111000) >> 3];
-			}
-			break;
-		}
-	}
-	apu_register_accessed = 0;
-	
 	if ((apu_status & 0b1) == 0)
 	{
 		pulse_1_length_counter = 0;
@@ -902,7 +966,7 @@ void apu_init()
 	noise_period_table[15] = 4068;
 	
 	apu_buffer_length = 0;
-	mixer_buffer = malloc(sizeof(int) * apu_buffer_max);
+	mixer_buffer = malloc(sizeof(int) * APU_BUFFER_MAX);
 	
 	triangle_linear_reload = 0;
 	triangle_length_counter = 0;
@@ -941,8 +1005,6 @@ void apu_init()
 	length_table[31] = 30;
 	
 	triangle_timer_count = 0;
-	
-	apu_register_accessed = 0;
 	
 	pulse_1_silence = 0;
 	pulse_2_silence = 0;

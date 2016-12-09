@@ -47,5 +47,7 @@ unsigned int run_opcode(unsigned char opcode);
 void get_pointer_at_cpu_address(unsigned char* data, unsigned int address, unsigned char write);
 
 void stack_dump();
+void cpu_save_state(FILE* save_file);
+void cpu_load_state(FILE* save_file);
 
 #endif

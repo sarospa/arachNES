@@ -455,6 +455,78 @@ void load_sprites()
 	}
 }
 
+void ppu_save_state(FILE* save_file)
+{
+	fwrite(&ppu_bus, sizeof(char), 1, save_file);
+	fwrite(&vram_address, sizeof(int), 1, save_file);
+	fwrite(&vram_temp, sizeof(int), 1, save_file);
+	fwrite(&fine_x_scroll, sizeof(char), 1, save_file);
+	fwrite(&ppu_control, sizeof(char), 1, save_file);
+	fwrite(&ppu_mask, sizeof(char), 1, save_file);
+	fwrite(&ppu_status, sizeof(char), 1, save_file);
+	fwrite(&oam_address, sizeof(char), 1, save_file);
+	fwrite(&ppu_data_buffer, sizeof(char), 1, save_file);
+	fwrite(&write_toggle, sizeof(char), 1, save_file);
+	fwrite(&odd_frame, sizeof(char), 1, save_file);
+	fwrite(&scanline, sizeof(int), 1, save_file);
+	fwrite(&scan_pixel, sizeof(int), 1, save_file);
+	fwrite(&bitmap_register_low, sizeof(int), 1, save_file);
+	fwrite(&bitmap_register_high, sizeof(int), 1, save_file);
+	fwrite(&palette_register_low, sizeof(char), 1, save_file);
+	fwrite(&palette_register_high, sizeof(char), 1, save_file);
+	fwrite(&palette_latch, sizeof(char), 1, save_file);
+	fwrite(&sprite_count, sizeof(char), 1, save_file);
+	fwrite(&sprite_0_selected, sizeof(char), 1, save_file);
+	fwrite(&pending_nmi, sizeof(char), 1, save_file);
+	fwrite(&nmi_occurred, sizeof(char), 1, save_file);
+	fwrite(&nmi_output, sizeof(char), 1, save_file);
+	
+	fwrite(ppu_ram, sizeof(char), 0x800, save_file);
+	fwrite(palette_ram, sizeof(char), 0x20, save_file);
+	fwrite(oam, sizeof(char), 0x100, save_file);
+	fwrite(secondary_oam, sizeof(char), 0x40, save_file);
+	fwrite(sprite_bitmaps_low, sizeof(char), 0x8, save_file);
+	fwrite(sprite_bitmaps_high, sizeof(char), 0x8, save_file);
+	fwrite(sprite_attributes, sizeof(char), 0x8, save_file);
+	fwrite(sprite_x_positions, sizeof(char), 0x8, save_file);
+}
+
+void ppu_load_state(FILE* save_file)
+{
+	fread(&ppu_bus, sizeof(char), 1, save_file);
+	fread(&vram_address, sizeof(int), 1, save_file);
+	fread(&vram_temp, sizeof(int), 1, save_file);
+	fread(&fine_x_scroll, sizeof(char), 1, save_file);
+	fread(&ppu_control, sizeof(char), 1, save_file);
+	fread(&ppu_mask, sizeof(char), 1, save_file);
+	fread(&ppu_status, sizeof(char), 1, save_file);
+	fread(&oam_address, sizeof(char), 1, save_file);
+	fread(&ppu_data_buffer, sizeof(char), 1, save_file);
+	fread(&write_toggle, sizeof(char), 1, save_file);
+	fread(&odd_frame, sizeof(char), 1, save_file);
+	fread(&scanline, sizeof(int), 1, save_file);
+	fread(&scan_pixel, sizeof(int), 1, save_file);
+	fread(&bitmap_register_low, sizeof(int), 1, save_file);
+	fread(&bitmap_register_high, sizeof(int), 1, save_file);
+	fread(&palette_register_low, sizeof(char), 1, save_file);
+	fread(&palette_register_high, sizeof(char), 1, save_file);
+	fread(&palette_latch, sizeof(char), 1, save_file);
+	fread(&sprite_count, sizeof(char), 1, save_file);
+	fread(&sprite_0_selected, sizeof(char), 1, save_file);
+	fread(&pending_nmi, sizeof(char), 1, save_file);
+	fread(&nmi_occurred, sizeof(char), 1, save_file);
+	fread(&nmi_output, sizeof(char), 1, save_file);
+	
+	fread(ppu_ram, sizeof(char), 0x800, save_file);
+	fread(palette_ram, sizeof(char), 0x20, save_file);
+	fread(oam, sizeof(char), 0x100, save_file);
+	fread(secondary_oam, sizeof(char), 0x40, save_file);
+	fread(sprite_bitmaps_low, sizeof(char), 0x8, save_file);
+	fread(sprite_bitmaps_high, sizeof(char), 0x8, save_file);
+	fread(sprite_attributes, sizeof(char), 0x8, save_file);
+	fread(sprite_x_positions, sizeof(char), 0x8, save_file);
+}
+
 // Returns the pixel data to be rendered. 255 indicates no render.
 // This will probably have to be made a bit more complex as more parts of the PPU are implemented.
 unsigned char ppu_tick()

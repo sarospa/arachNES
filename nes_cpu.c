@@ -10,8 +10,8 @@
 
 unsigned const char WRITE = 1;
 unsigned const char READ = 0;
+unsigned const int RAM_SIZE = 2048;
 
-unsigned int mapper_type;
 unsigned char accumulator;
 unsigned char x_register;
 unsigned char y_register;
@@ -471,6 +471,34 @@ void stack_dump()
 	{
 		printf("%04X: %02X\n", i, cpu_ram[i]);
 	}
+}
+
+void cpu_save_state(FILE* save_file)
+{
+	fwrite(&accumulator, sizeof(char), 1, save_file);
+	fwrite(&x_register, sizeof(char), 1, save_file);
+	fwrite(&y_register, sizeof(char), 1, save_file);
+	fwrite(&program_counter, sizeof(int), 1, save_file);
+	fwrite(&stack_pointer, sizeof(char), 1, save_file);
+	fwrite(&status_flags, sizeof(char), 1, save_file);
+	fwrite(&oam_dma_active, sizeof(char), 1, save_file);
+	fwrite(&oam_dma_page, sizeof(char), 1, save_file);
+	fwrite(&total_cycles, sizeof(int), 1, save_file);
+	fwrite(cpu_ram, sizeof(char), RAM_SIZE, save_file);
+}
+
+void cpu_load_state(FILE* save_file)
+{
+	fread(&accumulator, sizeof(char), 1, save_file);
+	fread(&x_register, sizeof(char), 1, save_file);
+	fread(&y_register, sizeof(char), 1, save_file);
+	fread(&program_counter, sizeof(int), 1, save_file);
+	fread(&stack_pointer, sizeof(char), 1, save_file);
+	fread(&status_flags, sizeof(char), 1, save_file);
+	fread(&oam_dma_active, sizeof(char), 1, save_file);
+	fread(&oam_dma_page, sizeof(char), 1, save_file);
+	fread(&total_cycles, sizeof(int), 1, save_file);
+	fread(cpu_ram, sizeof(char), RAM_SIZE, save_file);
 }
 
 // Carries out whatever instruction the opcode represents.
@@ -2379,7 +2407,6 @@ void reset_cpu()
 
 void cpu_init()
 {
-	mapper_type = 0;
 	accumulator = 0;
 	x_register = 0;
 	y_register = 0;
@@ -2391,8 +2418,8 @@ void cpu_init()
 	
 	total_cycles = 0;
 	
-	cpu_ram = malloc(sizeof(char) * KB * 2);
-	for (unsigned int i = 0; i < KB * 2; i++)
+	cpu_ram = malloc(sizeof(char) * RAM_SIZE);
+	for (unsigned int i = 0; i < RAM_SIZE; i++)
 	{
 		cpu_ram[i] = 0;
 	}
