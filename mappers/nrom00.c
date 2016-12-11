@@ -81,6 +81,18 @@ void fixed_get_pointer_at_nametable_address(unsigned char* data, unsigned int ad
 	}
 }
 
+// For mappers that have no state to save. Might be just NROM, but I'm not sure.
+void save_nothing(FILE* save_file __attribute__ ((unused)))
+{
+	
+}
+
+// For mappers that have no state to load. Might be just NROM, but I'm not sure.
+void load_nothing(FILE* save_file __attribute__ ((unused)))
+{
+	
+}
+
 void nrom00_init()
 {
 	// Nothing to do here.

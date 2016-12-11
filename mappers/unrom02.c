@@ -40,6 +40,16 @@ void unrom02_get_pointer_at_prg_address(unsigned char* data, unsigned int addres
 	}
 }
 
+void unrom02_save_state(FILE* save_file)
+{
+	fwrite(&bank_select, sizeof(char), 1, save_file);
+}
+
+void unrom02_load_state(FILE* save_file)
+{
+	fread(&bank_select, sizeof(char), 1, save_file);
+}
+
 void unrom02_init()
 {
 	bank_select = 0;

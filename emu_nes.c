@@ -208,6 +208,7 @@ void save_state()
 		ppu_save_state(save_state);
 		apu_save_state(save_state);
 		controller_save_state(save_state);
+		cartridge_save_state(save_state);
 		fclose(save_state);
 	}
 }
@@ -221,6 +222,7 @@ void load_state()
 		ppu_load_state(save_state);
 		apu_load_state(save_state);
 		controller_load_state(save_state);
+		cartridge_load_state(save_state);
 		fclose(save_state);
 		audio_buffer_writer = 0;
 		audio_buffer_reader = 0;
