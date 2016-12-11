@@ -631,13 +631,14 @@ unsigned char ppu_tick()
 							// Only load in sprite pixel if it's non-transparent.
 							if (sprite_palette > 0)
 							{
+								// Check for sprite 0 hit
+								if (background_enable && (background_bitmap_palette > 0) && (i == 0) && sprite_0_selected)
+								{
+									ppu_status = ppu_status | 0b01000000;
+								}
+								
 								if (background_enable && (background_bitmap_palette > 0) && (sprite_priority == 1))
 								{
-									// Check for sprite 0 hit
-									if ((i == 0) && sprite_0_selected)
-									{
-										ppu_status = ppu_status | 0b1000000;
-									}
 									pixel_data = background_pixel;
 								}
 								else
