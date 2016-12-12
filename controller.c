@@ -37,15 +37,12 @@ void write_controller_state(unsigned char* data, unsigned int address)
 		if ((controller_1_bus & 0b1) == 0b1)
 		{
 			controller_1_shift = 0;
+			controller_2_shift = 0;
 		}
 	}
 	else if (address == 0x4017)
 	{
-		controller_2_bus = *data;
-		if ((controller_2_bus & 0b1) == 0b1)
-		{
-			controller_2_shift = 0;
-		}
+		
 	}
 	else
 	{
@@ -60,7 +57,7 @@ void read_controller_state(unsigned char* data, unsigned int address)
 	{
 		if (controller_1_shift > 7)
 		{
-			controller_1_bus = 0;
+			controller_1_bus = 1;
 		}
 		else
 		{
@@ -73,7 +70,7 @@ void read_controller_state(unsigned char* data, unsigned int address)
 	{
 		if (controller_2_shift > 7)
 		{
-			controller_2_bus = 0;
+			controller_2_bus = 1;
 		}
 		else
 		{

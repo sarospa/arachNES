@@ -56,14 +56,11 @@ void get_pointer_at_cpu_address(unsigned char* data, unsigned int address, unsig
 			read_controller_state(data, address);
 		}
 		// 0x4017 is weird because it's partly controller port 2 and partly APU frame counter.
-		// I'm not using controller port 2 at the moment, so I'll figure this out later.
-		/*else if (address == 0x4017)
+		// It appears that reads only get the controller data, though.
+		else if (address == 0x4017)
 		{
-			if (access_type == WRITE)
-			{
-				
-			}
-		}*/
+			read_controller_state(data, address);
+		}
 		else if (address >= 0x4000 && address <= 0x4017)
 		{
 			apu_read(data, address);
@@ -99,20 +96,17 @@ void get_pointer_at_cpu_address(unsigned char* data, unsigned int address, unsig
 			oam_dma_page = *data;
 		}
 		// Player 1 controller port.
-		// Will have to figure that out eventually.
 		else if (address == 0x4016)
 		{
 			write_controller_state(data, address);
 		}
 		// 0x4017 is weird because it's partly controller port 2 and partly APU frame counter.
-		// I'm not using controller port 2 at the moment, so I'll figure this out later.
-		/*else if (address == 0x4017)
+		else if (address == 0x4017)
 		{
-			if (access_type == WRITE)
-			{
-				
-			}
-		}*/
+			printf("Writing %02X to address %04X.\n", *data, address);
+			write_controller_state(data, address);
+			apu_write(data, address);
+		}
 		else if (address >= 0x4000 && address <= 0x4017)
 		{
 			apu_write(data, address);
@@ -514,6 +508,11 @@ void cpu_load_state(FILE* save_file)
 // Indirect,Y: Written as ($00),Y. Works like a zero page indirect, but after it accesses the address at the pointer, it adds the y register.
 unsigned int run_opcode(unsigned char opcode)
 {
+	if (program_counter == 0x824D)
+	{
+		printf("Comparing at $824D. Accumulator at %02X.\n", accumulator);
+	}
+	
 	unsigned int cycles = 0;
 	
 	switch(opcode)
