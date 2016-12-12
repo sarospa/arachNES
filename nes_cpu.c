@@ -103,7 +103,6 @@ void get_pointer_at_cpu_address(unsigned char* data, unsigned int address, unsig
 		// 0x4017 is weird because it's partly controller port 2 and partly APU frame counter.
 		else if (address == 0x4017)
 		{
-			printf("Writing %02X to address %04X.\n", *data, address);
 			write_controller_state(data, address);
 			apu_write(data, address);
 		}
@@ -508,11 +507,6 @@ void cpu_load_state(FILE* save_file)
 // Indirect,Y: Written as ($00),Y. Works like a zero page indirect, but after it accesses the address at the pointer, it adds the y register.
 unsigned int run_opcode(unsigned char opcode)
 {
-	if (program_counter == 0x824D)
-	{
-		printf("Comparing at $824D. Accumulator at %02X.\n", accumulator);
-	}
-	
 	unsigned int cycles = 0;
 	
 	switch(opcode)
