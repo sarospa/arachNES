@@ -177,9 +177,7 @@ void push_audio()
 
 void nes_loop()
 {
-	unsigned char opcode;
-	get_pointer_at_cpu_address(&opcode, program_counter, READ);
-	unsigned int cycles = run_opcode(opcode);
+	unsigned int cycles = run_opcode();
 	
 	for (unsigned int i = 0; i < cycles; i++)
 	{
@@ -469,7 +467,7 @@ void handle_user_input()
 								for (int i = 0; i < 0x1000; i++)
 								{
 									unsigned char data;
-									get_pointer_at_cpu_address(&data, i, READ);
+									access_cpu_memory(&data, i, READ);
 									printf("%04X: %02X\n", i, data);
 								}
 								break;
