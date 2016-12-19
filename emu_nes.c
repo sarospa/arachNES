@@ -301,11 +301,13 @@ void handle_user_input()
 					switch(event.cbutton.button)
 					{
 						case SDL_CONTROLLER_BUTTON_A:
+						case SDL_CONTROLLER_BUTTON_Y:
 						{
 							controller_1_data = controller_1_data | 0b00000001;
 							break;
 						}
 						case SDL_CONTROLLER_BUTTON_B:
+						case SDL_CONTROLLER_BUTTON_X:
 						{
 							controller_1_data = controller_1_data | 0b00000010;
 							break;
@@ -348,11 +350,13 @@ void handle_user_input()
 					switch(event.cbutton.button)
 					{
 						case SDL_CONTROLLER_BUTTON_A:
+						case SDL_CONTROLLER_BUTTON_Y:
 						{
 							controller_1_data = controller_1_data & 0b11111110;
 							break;
 						}
 						case SDL_CONTROLLER_BUTTON_B:
+						case SDL_CONTROLLER_BUTTON_X:
 						{
 							controller_1_data = controller_1_data & 0b11111101;
 							break;
