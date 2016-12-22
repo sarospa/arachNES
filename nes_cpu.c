@@ -11,6 +11,8 @@
 unsigned const char WRITE = 1;
 unsigned const char READ = 0;
 unsigned const int RAM_SIZE = 2048;
+unsigned const int FIRST_HALF_DECODE_LINES = 65;
+unsigned const int SECOND_HALF_DECODE_LINES = 66;
 
 // Struct for holding data on a decode ROM line.
 // Each line has an opcode condition for turning on, in which each bit
@@ -42,11 +44,20 @@ unsigned char oam_dma_page = 0;
 unsigned char timing_cycle = 0b000100;
 unsigned char next_timing_cycle = 0;
 unsigned int address_bus = 0;
+unsigned char address_low_bus = 0;
+unsigned char address_high_bus = 0;
 unsigned char data_bus = 0;
 unsigned char predecode_bus = 0;
 unsigned char execute_bus = 0xEA; // For now, start off execute bus on NOP
+// Misc storage value. In the 6502, this might be represented by various
+// different internal buses, but since I don't know what a lot of them
+// mean, I'm not going to pretend that I do.
+unsigned char internal_storage = 0;
 
-struct DecodeLine* decode_lines;
+// Represents lines for ops that do something in the first half of the cycle.
+struct DecodeLine* decode_lines_first_half;
+// Represents lines for ops that do something in the second half of the cycle.
+struct DecodeLine* decode_lines_second_half;
 // The push/pull op negates certain other ops, so there needs to be special
 // case handling for that.
 unsigned char PUSH_PULL_OP_INDEX = 0;
@@ -524,6 +535,7 @@ void do_nothing()
 	
 }
 
+// Clears the overflow flag. There is no corresponding set opcode.
 void op_clv()
 {
 	status_flags = status_flags & 0b10111111;
@@ -555,6 +567,7 @@ void op_T0_cli_sei()
 	}
 }
 
+// Sets the decimal flag to bit 5 of the opcode.
 void op_T0_cld_sed()
 {
 	if ((execute_bus & 0b00100000) == 0b00100000)
@@ -567,15 +580,73 @@ void op_T0_cld_sed()
 	}
 }
 
+void op_T0_lda()
+{
+	load_register(&accumulator, data_bus);
+}
+
+// Artificial line. It looks like ALU instructions always increment the
+// program counter on T2.
+void op_T2_acc()
+{
+	program_counter++;
+}
+
+// On T0, fetch next instruction, load program counter into ADL/ADH, and
+// make sure the next cycle is T1 (to override T0+T2 rolling into T1+T3).
 void op_T0()
 {
 	next_timing_cycle = 0b000010;
-	access_cpu_memory(&predecode_bus, program_counter, READ);
+	predecode_bus = data_bus;
+	address_low_bus = program_counter & 0x00FF;
+	address_high_bus = (program_counter >> 8) & 0x00FF;
 }
 
+// Need to read the next byte for address high, but address low needs
+// to be stuffed somewhere to use later.
+void op_T2_abs()
+{
+	address_low_bus = (program_counter + 1) & 0x00FF;
+	address_high_bus = ((program_counter + 1) >> 8) & 0x00FF;
+	internal_storage = data_bus;
+}
+
+// Zero page opcodes reset the timing cycle at T2.
+void op_T2_mem_zp()
+{
+	next_timing_cycle = 0b000001;
+}
+
+// Sets the adl/adh buses to the address on the data bus, at the zero page.
+void op_T2_ADL_ADD()
+{
+	address_low_bus = data_bus;
+	address_high_bus = 0x00;
+}
+
+// Add X register to address low for indexed zero page. Timing cycle also
+// resets here.
+void op_T3_mem_zp_idx()
+{
+	address_low_bus += x_register;
+	next_timing_cycle = 0b000001;
+}
+
+// Load ADL from where we stuffed it last cycle, and ADH from the data bus.
+// Timing cycle also resets here.
+void op_T3_mem_abs()
+{
+	address_low_bus = internal_storage;
+	address_high_bus = data_bus;
+	next_timing_cycle = 0b000001;
+	program_counter++;
+}
+
+// Two-cycle instructions have an odd behavior where T0 and T2 run at the
+// same time. The CPU has a special check for this that covers all two-cycle
+// instructions, which is reproduced here.
 void activate_T0_for_two_cycle_op()
 {
-	// This somewhat complicated check should cover all the two-cycle instructions.
 	if (((predecode_bus & 0b00011101) == 0b00001001)
 		|| ((predecode_bus & 0b10011101) == 0b10000000)
 		|| (((predecode_bus & 0b00001101) == 0b00001000) && !((predecode_bus & 0b10010010) == 0b00000000)))
@@ -593,7 +664,12 @@ void activate_T0_for_two_cycle_op()
 // behaving correctly on every cycle.
 void cpu_tick()
 {
-	next_timing_cycle = 0xFF;
+	access_cpu_memory(&data_bus, address_bus, READ);
+	
+	//printf("%04X: OP:%02X A:%02X D:%02X ADL:%02X ADH:%02X ADB:%04X T:%02X\n", program_counter, execute_bus, accumulator, data_bus, address_low_bus, address_high_bus, address_bus, timing_cycle);
+	
+	// Assuming the default behavior is to shift to the next timing cycle.
+	next_timing_cycle = (timing_cycle << 1) & 0b111111;
 	
 	// This should go earlier, but this is kinda necessary for now.
 	if ((timing_cycle & 0b000100) == 0b000100)
@@ -601,34 +677,46 @@ void cpu_tick()
 		activate_T0_for_two_cycle_op();
 	}
 	
-	for (unsigned int i = 0; i < 131; i++)
+	for (unsigned int i = 0; i < FIRST_HALF_DECODE_LINES; i++)
 	{
 		// Activate this op if we're on the right timing cycle, and the current opcode matches the pattern.
-		if (((execute_bus & decode_lines[i].opcode_mask) == decode_lines[i].opcode_bits) && ((timing_cycle & decode_lines[i].timing) == decode_lines[i].timing))
+		if (((execute_bus & decode_lines_first_half[i].opcode_mask) == decode_lines_first_half[i].opcode_bits) && ((timing_cycle & decode_lines_first_half[i].timing) == decode_lines_first_half[i].timing))
 		{
 			// Skip this op if it's negated by op-push/pull, and op-push/pull is on.
-			if (!decode_lines[i].push_pull_negate || ((execute_bus & decode_lines[PUSH_PULL_OP_INDEX].opcode_mask) != decode_lines[PUSH_PULL_OP_INDEX].opcode_bits))
+			if (!decode_lines_first_half[i].push_pull_negate || ((execute_bus & decode_lines_second_half[PUSH_PULL_OP_INDEX].opcode_mask) != decode_lines_second_half[PUSH_PULL_OP_INDEX].opcode_bits))
 			{
-				decode_lines[i].rom_op();
+				decode_lines_first_half[i].rom_op();
 			}
 		}
 	}
 	
 	if ((timing_cycle & 0b000010) == 0b000010)
 	{
+		address_low_bus = program_counter & 0x00FF;
+		address_high_bus = (program_counter >> 8) & 0x00FF;
+	}
+	
+	for (unsigned int i = 0; i < SECOND_HALF_DECODE_LINES; i++)
+	{
+		// Activate this op if we're on the right timing cycle, and the current opcode matches the pattern.
+		if (((execute_bus & decode_lines_second_half[i].opcode_mask) == decode_lines_second_half[i].opcode_bits) && ((timing_cycle & decode_lines_second_half[i].timing) == decode_lines_second_half[i].timing))
+		{
+			// Skip this op if it's negated by op-push/pull, and op-push/pull is on.
+			if (!decode_lines_second_half[i].push_pull_negate || ((execute_bus & decode_lines_second_half[PUSH_PULL_OP_INDEX].opcode_mask) != decode_lines_second_half[PUSH_PULL_OP_INDEX].opcode_bits))
+			{
+				decode_lines_second_half[i].rom_op();
+			}
+		}
+	}
+	
+	address_bus = address_low_bus | (address_high_bus << 8);
+	
+	if ((timing_cycle & 0b000010) == 0b000010)
+	{
 		execute_bus = predecode_bus;
 	}
 	
-	// Little bit of a hack to give the CPU a 'standard' operation when no next timing is supplied.
-	// This may eventually be unnecessary.
-	if (next_timing_cycle == 0xFF)
-	{
-		timing_cycle = (timing_cycle << 1) & 0b111111;
-	}
-	else
-	{
-		timing_cycle = next_timing_cycle;
-	}
+	timing_cycle = next_timing_cycle;
 }
 
 // Carries out whatever instruction the opcode represents.
@@ -1981,55 +2069,6 @@ unsigned int run_opcode()
 				cycles = 4;
 				break;
 			}
-			// LDA: Loads a byte into the accumulator.
-			// Immediate LDA. Hex: $A9  Len: 2  Time: 2
-			// Affects flags S and Z.
-			case 0xA9:
-			{
-				unsigned int address = immediate_address();
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				load_register(&accumulator, load_byte);
-				program_counter++;
-				cycles = 2;
-				break;
-			}
-			// Zero page LDA. Hex: $A5  Len: 2  Time: 3
-			// Affects flags S and Z.
-			case 0xA5:
-			{
-				unsigned int address = zero_page_address();
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				load_register(&accumulator, load_byte);
-				program_counter++;
-				cycles = 3;
-				break;
-			}
-			// Zero page,X LDA. Hex: $B5  Len: 2  Time: 4
-			// Affects flags S and Z.
-			case 0xB5:
-			{
-				unsigned int address = zero_page_indexed_address(x_register);
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				load_register(&accumulator, load_byte);
-				program_counter++;
-				cycles = 4;
-				break;
-			}
-			// Absolute LDA. Hex: $AD  Len: 3  Time: 4
-			// Affects flags S and Z.
-			case 0xAD:
-			{
-				unsigned int address = absolute_address();
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				load_register(&accumulator, load_byte);
-				program_counter += 2;
-				cycles = 4;
-				break;
-			}
 			// Absolute,X LDA. Hex: $BD  Len: 3  Time: 4 + 1 [if crossed page boundary]
 			// Affects flags S and Z.
 			case 0xBD:
@@ -2454,6 +2493,7 @@ unsigned int run_opcode()
 		access_cpu_memory(&predecode_bus, program_counter, READ);
 		execute_bus = predecode_bus;
 		program_counter++;
+		address_bus = program_counter;
 	}
 	
 	total_cycles += cycles;
@@ -2476,24 +2516,38 @@ void cpu_init()
 		cpu_ram[i] = 0;
 	}
 	
-	// A list of decode lines, containing all the information needed to
-	// determine when it fires.
+	// Two lists of decode lines, containing all the information needed to
+	// determine when it fires. The first list is for half cycle 1, the second
+	// list is for half cycle 2.
 	// I'm putting the rom op at the start of the struct init, so it
 	// should be clear enough what each one is for.
-	decode_lines = malloc(sizeof(struct DecodeLine) * 131);
-	for (unsigned int i = 0; i < 131; i++)
+	decode_lines_first_half = malloc(sizeof(struct DecodeLine) * FIRST_HALF_DECODE_LINES);
+	decode_lines_second_half = malloc(sizeof(struct DecodeLine) * SECOND_HALF_DECODE_LINES);
+	for (unsigned int i = 0; i < FIRST_HALF_DECODE_LINES; i++)
 	{
-		decode_lines[i] = (struct DecodeLine) { .opcode_bits = 0b00000000, .opcode_mask = 0b00000000, .timing = 0b000000, .push_pull_negate = 0, .rom_op = do_nothing };
+		decode_lines_first_half[i] = (struct DecodeLine) { .opcode_bits = 0b00000000, .opcode_mask = 0b00000000, .timing = 0b000000, .push_pull_negate = 0, .rom_op = do_nothing };
 	}
+	for (unsigned int i = 0; i < SECOND_HALF_DECODE_LINES; i++)
+	{
+		decode_lines_second_half[i] = (struct DecodeLine) { .opcode_bits = 0b00000000, .opcode_mask = 0b00000000, .timing = 0b000000, .push_pull_negate = 0, .rom_op = do_nothing };
+	}
+	
+	decode_lines_first_half[0] = (struct DecodeLine) { .rom_op = op_T3_mem_zp_idx, .opcode_bits = 0b00010100, .opcode_mask = 0b00011100, .timing = 0b001000, .push_pull_negate = 0 };
+	decode_lines_first_half[1] = (struct DecodeLine) { .rom_op = op_T2_abs, .opcode_bits = 0b00001100, .opcode_mask = 0b00011100, .timing = 0b000100, .push_pull_negate = 0 };
+	decode_lines_first_half[2] = (struct DecodeLine) { .rom_op = op_T3_mem_abs, .opcode_bits = 0b00001100, .opcode_mask = 0b00011100, .timing = 0b001000, .push_pull_negate = 0 };
 	
 	// op-push/pull
 	// TODO: fill in the function for this
-	decode_lines[0] = (struct DecodeLine) { .rom_op = do_nothing, .opcode_bits = 0b00001000, .opcode_mask = 0b10011111, .timing = 0, .push_pull_negate = 0 };
-	decode_lines[1] = (struct DecodeLine) { .rom_op = op_T0, .opcode_bits = 0b00000000, .opcode_mask = 0b00000000, .timing = 0b000001, .push_pull_negate = 0 };
-	decode_lines[2] = (struct DecodeLine) { .rom_op = op_clv, .opcode_bits = 0b10111000, .opcode_mask = 0b11111111, .timing = 0, .push_pull_negate = 0 };
-	decode_lines[3] = (struct DecodeLine) { .rom_op = op_T0_clc_sec, .opcode_bits = 0b00011000, .opcode_mask = 0b11011111, .timing = 0b000001, .push_pull_negate = 0 };
-	decode_lines[4] = (struct DecodeLine) { .rom_op = op_T0_cli_sei, .opcode_bits = 0b01011000, .opcode_mask = 0b11011111, .timing = 0b000001, .push_pull_negate = 0 };
-	decode_lines[5] = (struct DecodeLine) { .rom_op = op_T0_cld_sed, .opcode_bits = 0b11011000, .opcode_mask = 0b11011111, .timing = 0b000001, .push_pull_negate = 0 };
+	decode_lines_second_half[0] = (struct DecodeLine) { .rom_op = do_nothing, .opcode_bits = 0b00001000, .opcode_mask = 0b10011111, .timing = 0, .push_pull_negate = 0 };
+	decode_lines_second_half[1] = (struct DecodeLine) { .rom_op = op_T0, .opcode_bits = 0b00000000, .opcode_mask = 0b00000000, .timing = 0b000001, .push_pull_negate = 0 };
+	decode_lines_second_half[2] = (struct DecodeLine) { .rom_op = op_clv, .opcode_bits = 0b10111000, .opcode_mask = 0b11111111, .timing = 0, .push_pull_negate = 0 };
+	decode_lines_second_half[3] = (struct DecodeLine) { .rom_op = op_T0_clc_sec, .opcode_bits = 0b00011000, .opcode_mask = 0b11011111, .timing = 0b000001, .push_pull_negate = 0 };
+	decode_lines_second_half[4] = (struct DecodeLine) { .rom_op = op_T0_cli_sei, .opcode_bits = 0b01011000, .opcode_mask = 0b11011111, .timing = 0b000001, .push_pull_negate = 0 };
+	decode_lines_second_half[5] = (struct DecodeLine) { .rom_op = op_T0_cld_sed, .opcode_bits = 0b11011000, .opcode_mask = 0b11011111, .timing = 0b000001, .push_pull_negate = 0 };
+	decode_lines_second_half[6] = (struct DecodeLine) { .rom_op = op_T0_lda, .opcode_bits = 0b10100001, .opcode_mask = 0b11100001, .timing = 0b000001, .push_pull_negate = 0 };
+	decode_lines_second_half[7] = (struct DecodeLine) { .rom_op = op_T2_acc, .opcode_bits = 0b00000001, .opcode_mask = 0b00000001, .timing = 0b000100, .push_pull_negate = 0 };
+	decode_lines_second_half[8] = (struct DecodeLine) { .rom_op = op_T2_mem_zp, .opcode_bits = 0b00000100, .opcode_mask = 0b00011100, .timing = 0b000100, .push_pull_negate = 0 };
+	decode_lines_second_half[9] = (struct DecodeLine) { .rom_op = op_T2_ADL_ADD, .opcode_bits = 0b00000000, .opcode_mask = 0b00001000, .timing = 0b000100, .push_pull_negate = 0 };
 	
 	reset_cpu();
 }
