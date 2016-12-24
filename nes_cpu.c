@@ -26,8 +26,6 @@ struct DecodeLine
 	unsigned char opcode_bits;
 	unsigned char opcode_mask;
 	unsigned char timing;
-	// Flag to indicate that this line won't turn on if push/pull is on.
-	unsigned char push_pull_negate;
 	void (*rom_op)(void);
 };
 
@@ -49,10 +47,13 @@ unsigned char address_high_bus = 0;
 unsigned char data_bus = 0;
 unsigned char predecode_bus = 0;
 unsigned char execute_bus = 0xEA; // For now, start off execute bus on NOP
-// Misc storage value. In the 6502, this might be represented by various
-// different internal buses, but since I don't know what a lot of them
-// mean, I'm not going to pretend that I do.
-unsigned char internal_storage = 0;
+// The two inputs and one output for the ALU. Most of our calculations
+// can be done directly, but certain internal calculations use these registers.
+unsigned char alu_in_a = 0;
+unsigned char alu_in_b = 0;
+unsigned char alu_out = 0;
+// Controls the CPU's reads and writes to memory. 1 == read, 0 == write.
+unsigned char read_write = 1;
 
 // Represents lines for ops that do something in the first half of the cycle.
 struct DecodeLine* decode_lines_first_half;
@@ -530,6 +531,14 @@ void cpu_load_state(FILE* save_file)
 	fread(cpu_ram, sizeof(char), RAM_SIZE, save_file);
 }
 
+// Should indicate true for ASL, ROL, LSR, ROR, INC, and DEX.
+unsigned char is_rmw_instruction()
+{
+	unsigned char group = execute_bus & 0b00000011;
+	unsigned char function_bits = (execute_bus & 0b11000000) >> 6;
+	return (group == 0b10) && ((function_bits == 0b00) || (function_bits == 0b01) || (function_bits == 0b11));
+}
+
 void do_nothing()
 {
 	
@@ -585,11 +594,127 @@ void op_T0_lda()
 	load_register(&accumulator, data_bus);
 }
 
-// Artificial line. It looks like ALU instructions always increment the
-// program counter on T2.
-void op_T2_acc()
+void op_T0_and()
 {
-	program_counter++;
+	bitwise_and(data_bus);
+}
+
+void op_T0_ora()
+{
+	bitwise_or(data_bus);
+}
+
+void op_T0_eor()
+{
+	bitwise_xor(data_bus);
+}
+
+void op_T0_adc()
+{
+	add_with_carry(data_bus);
+}
+
+void op_T0_sbc()
+{
+	subtract_with_carry(data_bus);
+}
+
+void op_T0_cmp()
+{
+	compare_register(accumulator, data_bus);
+}
+
+void op_T0_sta()
+{
+	// Bit of a hack to keep it from trying to do a write on immediate,
+	// thus turning it into a NOP #i as it's supposed to be.
+	if (timing_cycle == 0b000001)
+	{
+		data_bus = accumulator;
+	}
+}
+
+void op_T0_inc()
+{
+	data_bus++;
+	test_negative_flag(data_bus);
+	test_zero_flag(data_bus);
+}
+
+void op_T0_dec()
+{
+	data_bus--;
+	test_negative_flag(data_bus);
+	test_zero_flag(data_bus);
+}
+
+void op_T0_asl()
+{
+	data_bus = arithmetic_shift_left(data_bus);
+}
+
+void op_T0_lsr()
+{
+	data_bus = logical_shift_right(data_bus);
+}
+
+void op_T0_rol()
+{
+	data_bus = rotate_left(data_bus);
+}
+
+void op_T0_ror()
+{
+	data_bus = rotate_right(data_bus);
+}
+
+// Bit of a hacky solution, although I believe it roughly imitates the CPU.
+// Sets read/write mode to write on:
+// T2 in zero page mode
+// T3 in zero page,X and absolute mode
+// T4 in absolute,X and absolute,Y mode
+// T5 in indirect,X and indirect,Y mode
+void op_sta()
+{
+	char addressing_mode = (execute_bus & 0b00011100) >> 2;
+	if (((addressing_mode == 0b001) && (timing_cycle == 0b000100))
+		|| (((addressing_mode == 0b101) || (addressing_mode == 0b011)) && (timing_cycle == 0b001000))
+		|| (((addressing_mode == 0b111) || (addressing_mode == 0b110)) && (timing_cycle == 0b010000))
+		|| (((addressing_mode == 0b100) || (addressing_mode == 0b000)) && (timing_cycle == 0b100000)))
+	{
+		read_write = 0;
+	}
+}
+
+void op_rmw()
+{
+	if (read_write == 0)
+	{
+		next_timing_cycle = 0b000001;
+	}
+	
+	char addressing_mode = (execute_bus & 0b00011100) >> 2;
+	if (((addressing_mode == 0b001) && (timing_cycle == 0b001000))
+		|| (((addressing_mode == 0b101) || (addressing_mode == 0b011)) && (timing_cycle == 0b010000))
+		|| ((addressing_mode == 0b111) && (timing_cycle == 0b100000)))
+	{
+		read_write = 0;
+	}
+	
+	if (timing_cycle == 0b000100)
+	{
+		program_counter++;
+	}
+}
+
+void op_lsr_ror_dec_inc()
+{
+	op_rmw();
+}
+
+void op_asl_rol()
+{
+	op_rmw();
 }
 
 // On T0, fetch next instruction, load program counter into ADL/ADH, and
@@ -600,6 +725,14 @@ void op_T0()
 	predecode_bus = data_bus;
 	address_low_bus = program_counter & 0x00FF;
 	address_high_bus = (program_counter >> 8) & 0x00FF;
+	read_write = 1;
+}
+
+// Artificial line. It looks like ALU instructions always increment the
+// program counter on T2.
+void op_T2_acc()
+{
+	program_counter++;
 }
 
 // Need to read the next byte for address high, but address low needs
@@ -608,12 +741,95 @@ void op_T2_abs()
 {
 	address_low_bus = (program_counter + 1) & 0x00FF;
 	address_high_bus = ((program_counter + 1) >> 8) & 0x00FF;
-	internal_storage = data_bus;
+	alu_in_b = data_bus;
+}
+
+// Artificial line. Stores x in alua and the low address byte in
+// alub to be added together next cycle.
+void op_T2_abs_x()
+{
+	address_low_bus = (program_counter + 1) & 0x00FF;
+	address_high_bus = ((program_counter + 1) >> 8) & 0x00FF;
+	alu_in_a = x_register;
+	alu_in_b = data_bus;
+}
+
+// Stores y in alua and the low address byte in
+// alub to be added together next cycle.
+void op_T2_abs_y()
+{
+	address_low_bus = (program_counter + 1) & 0x00FF;
+	address_high_bus = ((program_counter + 1) >> 8) & 0x00FF;
+	alu_in_a = y_register;
+	alu_in_b = data_bus;
 }
 
 // Zero page opcodes reset the timing cycle at T2.
 void op_T2_mem_zp()
 {
+	if (!is_rmw_instruction())
+	{
+		next_timing_cycle = 0b000001;
+	}
+}
+
+void op_T2_ind_y()
+{
+	address_low_bus = data_bus;
+	address_high_bus = 0;
+}
+
+void op_T3_ind_y()
+{
+	address_low_bus++;
+	alu_in_b = data_bus;
+}
+
+void op_T4_ind_y()
+{
+	address_low_bus = y_register + alu_in_b;
+	address_high_bus = data_bus;
+	// Add an extra cycle if the sum overflowed or in write instructions.
+	if ((address_low_bus >= alu_in_b) && ((0b11100001 & execute_bus) != 0b10000001))
+	{
+		next_timing_cycle = 0b000001;
+	}
+}
+
+void op_T5_ind_y()
+{
+	// Confirm that the sum overflowed, since the extra cycle also might be
+	// for a write.
+	if (address_low_bus < alu_in_b)
+	{
+		address_high_bus++;
+	}
+	next_timing_cycle = 0b000001;
+}
+
+void op_T2_ind_x()
+{
+	address_low_bus = data_bus;
+	address_high_bus = 0;
+	alu_in_b = data_bus;
+	alu_in_a = x_register;
+}
+
+void op_T3_ind_x()
+{
+	address_low_bus = alu_in_a + alu_in_b;
+}
+
+void op_T4_ind_x()
+{
+	alu_in_b = data_bus;
+	address_low_bus++;
+}
+
+void op_T5_ind_x()
+{
+	address_low_bus = alu_in_b;
+	address_high_bus = data_bus;
 	next_timing_cycle = 0b000001;
 }
 
@@ -629,17 +845,53 @@ void op_T2_ADL_ADD()
 void op_T3_mem_zp_idx()
 {
 	address_low_bus += x_register;
-	next_timing_cycle = 0b000001;
+	if (!is_rmw_instruction())
+	{
+		next_timing_cycle = 0b000001;
+	}
 }
 
 // Load ADL from where we stuffed it last cycle, and ADH from the data bus.
 // Timing cycle also resets here.
 void op_T3_mem_abs()
 {
-	address_low_bus = internal_storage;
+	address_low_bus = alu_in_b;
 	address_high_bus = data_bus;
-	next_timing_cycle = 0b000001;
+	if (!is_rmw_instruction())
+	{
+		next_timing_cycle = 0b000001;
+	}
 	program_counter++;
+}
+
+// Sum the low address byte with X to get the indexed address. Check if
+// we need to spend another cycle on page crossing.
+void op_T3_abs_idx()
+{
+	address_low_bus = alu_in_a + alu_in_b;
+	address_high_bus = data_bus;
+	// Add an extra cycle if the sum overflowed or in STA instructions.
+	if ((address_low_bus >= alu_in_b) && ((0b11100001 & execute_bus) != 0b10000001)
+		&& (!is_rmw_instruction()))
+	{
+		next_timing_cycle = 0b000001;
+	}
+	program_counter++;
+}
+
+// Extra cycle for indexed absolute, for handling page crossing.
+void op_T4_abs_idx()
+{
+	// Confirm that the sum overflowed, since the extra cycle also might be
+	// for a write.
+	if (address_low_bus < alu_in_b)
+	{
+		address_high_bus++;
+	}
+	if (!is_rmw_instruction())
+	{
+		next_timing_cycle = 0b000001;
+	}
 }
 
 // Two-cycle instructions have an odd behavior where T0 and T2 run at the
@@ -664,9 +916,18 @@ void activate_T0_for_two_cycle_op()
 // behaving correctly on every cycle.
 void cpu_tick()
 {
-	access_cpu_memory(&data_bus, address_bus, READ);
+	unsigned char prev_read_write = read_write;
 	
-	//printf("%04X: OP:%02X A:%02X D:%02X ADL:%02X ADH:%02X ADB:%04X T:%02X\n", program_counter, execute_bus, accumulator, data_bus, address_low_bus, address_high_bus, address_bus, timing_cycle);
+	if (prev_read_write == 1)
+	{
+		access_cpu_memory(&data_bus, address_bus, READ);
+	}
+	
+	if (execute_bus == 0xE6)
+	{
+		//printf("%04X: OP:%02X A:%02X X:%02X Y:%02X D:%02X ADL:%02X ADH:%02X ADB:%04X RW:%02X T:%02X ", program_counter, execute_bus, accumulator, x_register, y_register, data_bus, address_low_bus, address_high_bus, address_bus, prev_read_write, timing_cycle);
+	}
+	
 	
 	// Assuming the default behavior is to shift to the next timing cycle.
 	next_timing_cycle = (timing_cycle << 1) & 0b111111;
@@ -682,12 +943,19 @@ void cpu_tick()
 		// Activate this op if we're on the right timing cycle, and the current opcode matches the pattern.
 		if (((execute_bus & decode_lines_first_half[i].opcode_mask) == decode_lines_first_half[i].opcode_bits) && ((timing_cycle & decode_lines_first_half[i].timing) == decode_lines_first_half[i].timing))
 		{
-			// Skip this op if it's negated by op-push/pull, and op-push/pull is on.
-			if (!decode_lines_first_half[i].push_pull_negate || ((execute_bus & decode_lines_second_half[PUSH_PULL_OP_INDEX].opcode_mask) != decode_lines_second_half[PUSH_PULL_OP_INDEX].opcode_bits))
-			{
-				decode_lines_first_half[i].rom_op();
-			}
+			decode_lines_first_half[i].rom_op();
 		}
+	}
+	
+	if (execute_bus == 0xE6)
+	{
+		//printf("D2:%02X\n", data_bus);
+	}
+	
+	if (prev_read_write == 0)
+	{
+		//printf("Writing %02X to %04X.\n", data_bus, address_bus);
+		access_cpu_memory(&data_bus, address_bus, WRITE);
 	}
 	
 	if ((timing_cycle & 0b000010) == 0b000010)
@@ -701,11 +969,7 @@ void cpu_tick()
 		// Activate this op if we're on the right timing cycle, and the current opcode matches the pattern.
 		if (((execute_bus & decode_lines_second_half[i].opcode_mask) == decode_lines_second_half[i].opcode_bits) && ((timing_cycle & decode_lines_second_half[i].timing) == decode_lines_second_half[i].timing))
 		{
-			// Skip this op if it's negated by op-push/pull, and op-push/pull is on.
-			if (!decode_lines_second_half[i].push_pull_negate || ((execute_bus & decode_lines_second_half[PUSH_PULL_OP_INDEX].opcode_mask) != decode_lines_second_half[PUSH_PULL_OP_INDEX].opcode_bits))
-			{
-				decode_lines_second_half[i].rom_op();
-			}
+			decode_lines_second_half[i].rom_op();
 		}
 	}
 	
@@ -965,421 +1229,6 @@ unsigned int run_opcode()
 				cycles = 2;
 				break;
 			}
-			// INC: Increment memory byte.
-			// Zero page INC. Hex: $E6  Len: 2  Time: 5
-			// Affects flags S and Z.
-			case 0xE6:
-			{
-				unsigned int address = zero_page_address();
-				unsigned char target;
-				access_cpu_memory(&target, address, READ);
-				target += 1;
-				access_cpu_memory(&target, address, WRITE);
-				test_negative_flag(target);
-				test_zero_flag(target);
-				program_counter++;
-				cycles = 5;
-				break;
-			}
-			// Zero page,X INC. Hex: $F6  Len: 2  Time: 6
-			// Affects flags S and Z.
-			case 0xF6:
-			{
-				unsigned int address = zero_page_indexed_address(x_register);
-				unsigned char target;
-				access_cpu_memory(&target, address, READ);
-				target += 1;
-				access_cpu_memory(&target, address, WRITE);
-				test_negative_flag(target);
-				test_zero_flag(target);
-				program_counter++;
-				cycles = 6;
-				break;
-			}
-			// Absolute INC. Hex: $EE  Len: 3  Time: 6
-			// Affects flags S and Z.
-			case 0xEE:
-			{
-				unsigned int address = absolute_address();
-				unsigned char target;
-				access_cpu_memory(&target, address, READ);
-				target += 1;
-				access_cpu_memory(&target, address, WRITE);
-				test_negative_flag(target);
-				test_zero_flag(target);
-				program_counter += 2;
-				cycles = 6;
-				break;
-			}
-			// Absolute,X INC. Hex: $FE  Len: 3  Time: 7
-			// Affects flags S and Z.
-			case 0xFE:
-			{
-				unsigned int address = absolute_address() + x_register;
-				unsigned char target;
-				access_cpu_memory(&target, address, READ);
-				target += 1;
-				access_cpu_memory(&target, address, WRITE);
-				test_negative_flag(target);
-				test_zero_flag(target);
-				program_counter += 2;
-				cycles = 7;
-				break;
-			}
-			// DEC: Decrement memory byte.
-			// Zero page DEC. Hex: $C6  Len: 2  Time: 5
-			// Affects flags S and Z.
-			case 0xC6:
-			{
-				unsigned int address = zero_page_address();
-				unsigned char target;
-				access_cpu_memory(&target, address, READ);
-				target -= 1;
-				access_cpu_memory(&target, address, WRITE);
-				test_negative_flag(target);
-				test_zero_flag(target);
-				program_counter++;
-				cycles = 5;
-				break;
-			}
-			// Zero page,X DEC. Hex: $D6  Len: 2  Time: 6
-			// Affects flags S and Z.
-			case 0xD6:
-			{
-				unsigned int address = zero_page_indexed_address(x_register);
-				unsigned char target;
-				access_cpu_memory(&target, address, READ);
-				target -= 1;
-				access_cpu_memory(&target, address, WRITE);
-				test_negative_flag(target);
-				test_zero_flag(target);
-				program_counter++;
-				cycles = 6;
-				break;
-			}
-			// Absolute DEC. Hex: $CE  Len: 3  Time: 6
-			// Affects flags S and Z.
-			case 0xCE:
-			{
-				unsigned int address = absolute_address();
-				unsigned char target;
-				access_cpu_memory(&target, address, READ);
-				target -= 1;
-				access_cpu_memory(&target, address, WRITE);
-				test_negative_flag(target);
-				test_zero_flag(target);
-				program_counter += 2;
-				cycles = 6;
-				break;
-			}
-			// Absolute,X DEC. Hex: $DE  Len: 3  Time: 7
-			// Affects flags S and Z.
-			case 0xDE:
-			{
-				unsigned int address = absolute_address() + x_register;
-				unsigned char target;
-				access_cpu_memory(&target, address, READ);
-				target -= 1;
-				access_cpu_memory(&target, address, WRITE);
-				test_negative_flag(target);
-				test_zero_flag(target);
-				program_counter += 2;
-				cycles = 7;
-				break;
-			}
-			// ADC: Adds a value to the accumulator.
-			// Immediate ADC. Hex: $69  Len: 2  Time: 2
-			// Affects flags S, V, Z, and C.
-			case 0x69:
-			{
-				unsigned int address = immediate_address();
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				add_with_carry(load_byte);
-				program_counter++;
-				cycles = 2;
-				break;
-			}
-			// Zero page ADC. Hex: $65  Len: 2  Time: 3
-			// Affects flags S, V, Z, and C.
-			case 0x65:
-			{
-				unsigned int address = zero_page_address();
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				add_with_carry(load_byte);
-				program_counter++;
-				cycles = 3;
-				break;
-			}
-			// Zero page,X ADC. Hex: $75  Len: 2  Time: 4
-			// Affects flags S, V, Z, and C.
-			case 0x75:
-			{
-				unsigned int address = zero_page_indexed_address(x_register);
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				add_with_carry(load_byte);
-				program_counter++;
-				cycles = 4;
-				break;
-			}
-			// Absolute ADC. Hex: $6D  Len: 3  Time: 4
-			// Affects flags S, V, Z, and C.
-			case 0x6D:
-			{
-				unsigned int address = absolute_address();
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				add_with_carry(load_byte);
-				program_counter += 2;
-				cycles = 4;
-				break;
-			}
-			// Absolute,X ADC. Hex: $7D  Len: 3  Time: 4 + 1 [if page boundary crossed]
-			// Affects flags S, V, Z, and C.
-			case 0x7D:
-			{
-				cycles = 4;
-				unsigned int address = absolute_indexed_address(x_register, &cycles);
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				add_with_carry(load_byte);
-				program_counter += 2;
-				break;
-			}
-			// Absolute,Y ADC. Hex: $79  Len: 3  Time: 4 + 1 [if page boundary crossed]
-			// Affects flags S, V, Z, and C.
-			case 0x79:
-			{
-				cycles = 4;
-				unsigned int address = absolute_indexed_address(y_register, &cycles);
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				add_with_carry(load_byte);
-				program_counter += 2;
-				break;
-			}
-			// Indirect,X ADC. Hex: $61  Len: 2  Time: 6
-			// Affects flags S, V, Z, and C.
-			case 0x61:
-			{
-				unsigned int address = preindexed_indirect_address();
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				add_with_carry(load_byte);
-				program_counter++;
-				cycles = 6;
-				break;
-			}
-			// Indirect,Y ADC. Hex: $71  Len: 2  Time: 5 + 1 [if page boundary crossed]
-			// Affects flags S, V, Z, and C.
-			case 0x71:
-			{
-				cycles = 5;
-				unsigned int address = postindexed_indirect_address(&cycles);
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				add_with_carry(load_byte);
-				program_counter++;
-				break;
-			}
-			// SBC: Subtracts a value from the accumulator.
-			// Immediate SBC. Hex: $E9  Len: 2  Time: 2
-			// Affects flags S, V, Z, and C.
-			case 0xE9:
-			// Unofficial SBC.
-			case 0xEB:
-			{
-				unsigned int address = immediate_address();
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				subtract_with_carry(load_byte);
-				program_counter++;
-				cycles = 2;
-				break;
-			}
-			// Zero page SBC. Hex: $E5  Len: 2  Time: 3
-			// Affects flags S, V, Z, and C.
-			case 0xE5:
-			{
-				unsigned int address = zero_page_address();
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				subtract_with_carry(load_byte);
-				program_counter++;
-				cycles = 3;
-				break;
-			}
-			// Zero page,X SBC. Hex: $F5  Len: 2  Time: 4
-			// Affects flags S, V, Z, and C.
-			case 0xF5:
-			{
-				unsigned int address = zero_page_indexed_address(x_register);
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				subtract_with_carry(load_byte);
-				program_counter++;
-				cycles = 4;
-				break;
-			}
-			// Absolute SBC. Hex: $ED  Len: 3  Time: 4
-			// Affects flags S, V, Z, and C.
-			case 0xED:
-			{
-				unsigned int address = absolute_address();
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				subtract_with_carry(load_byte);
-				program_counter += 2;
-				cycles = 4;
-				break;
-			}
-			// Absolute,X SBC. Hex: $FD  Len: 3  Time: 4 + 1 [if crossed page boundary]
-			// Affects flags S, V, Z, and C.
-			case 0xFD:
-			{
-				cycles = 4;
-				unsigned int address = absolute_indexed_address(x_register, &cycles);
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				subtract_with_carry(load_byte);
-				program_counter += 2;
-				break;
-			}
-			// Absolute,Y SBC. Hex: $F9  Len: 3  Time: 4 + 1 [if crossed page boundary]
-			// Affects flags S, V, Z, and C.
-			case 0xF9:
-			{
-				cycles = 4;
-				unsigned int address = absolute_indexed_address(y_register, &cycles);
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				subtract_with_carry(load_byte);
-				program_counter += 2;
-				break;
-			}
-			// Indirect,X SBC. Hex: $E1  Len: 2  Time: 6
-			// Affects flags S, V, Z, and C.
-			case 0xE1:
-			{
-				unsigned int address = preindexed_indirect_address();
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				subtract_with_carry(load_byte);
-				program_counter++;
-				cycles = 6;
-				break;
-			}
-			// Indirect,Y SBC. Hex: $F1  Len: 2  Time: 5 + 1 [if crossed page boundary]
-			// Affects flags S, V, Z, and C.
-			case 0xF1:
-			{
-				cycles = 5;
-				unsigned int address = postindexed_indirect_address(&cycles);
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				subtract_with_carry(load_byte);
-				program_counter++;
-				break;
-			}
-			// AND: Performs bitwise AND with the accumulator.
-			// Immediate AND. Hex: $29  Len: 2  Time: 2
-			// Affects flags S and Z.
-			case 0x29:
-			{
-				unsigned int address = immediate_address();
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				bitwise_and(load_byte);
-				program_counter++;
-				cycles = 2;
-				break;
-			}
-			// Zero page AND. Hex: $25  Len: 2  Time: 3
-			// Affects flags S and Z.
-			case 0x25:
-			{
-				unsigned int address = zero_page_address();
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				bitwise_and(load_byte);
-				program_counter++;
-				cycles = 3;
-				break;
-			}
-			// Zero page,X AND. Hex: $35  Len: 2  Time: 4
-			// Affects flags S and Z.
-			case 0x35:
-			{
-				unsigned int address = zero_page_indexed_address(x_register);
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				bitwise_and(load_byte);
-				program_counter++;
-				cycles = 4;
-				break;
-			}
-			// Absolute AND. Hex: $2D  Len: 3  Time: 4
-			// Affects flags S and Z.
-			case 0x2D:
-			{
-				unsigned int address = absolute_address();
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				bitwise_and(load_byte);
-				program_counter += 2;
-				cycles = 4;
-				break;
-			}
-			// Absolute,X AND. Hex: $3D  Len: 3  Time: 4 + 1 [if crossed page boundary]
-			// Affects flags S and Z.
-			case 0x3D:
-			{
-				cycles = 4;
-				unsigned int address = absolute_indexed_address(x_register, &cycles);
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				bitwise_and(load_byte);
-				program_counter += 2;
-				break;
-			}
-			// Absolute,Y AND. Hex: $39  Len: 3  Time: 4 + 1 [if crossed page boundary]
-			// Affects flags S and Z.
-			case 0x39:
-			{
-				cycles = 4;
-				unsigned int address = absolute_indexed_address(y_register, &cycles);
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				bitwise_and(load_byte);
-				program_counter += 2;
-				break;
-			}
-			// Indirect,X AND. Hex: $21  Len: 2  Time: 6
-			// Affects flags S and Z.
-			case 0x21:
-			{
-				unsigned int address = preindexed_indirect_address();
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				bitwise_and(load_byte);
-				program_counter++;
-				cycles = 6;
-				break;
-			}
-			// Indirect,Y AND. Hex: $31  Len: 2  Time: 5 + 1 [if crossed page boundary]
-			// Affects flags S and Z.
-			case 0x31:
-			{
-				cycles = 5;
-				unsigned int address = postindexed_indirect_address(&cycles);
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				bitwise_and(load_byte);
-				program_counter++;
-				break;
-			}
 			// Unofficial opcode ANC. Performs an immediate AND, then copies flag S into flag C.
 			// Hex: $0B or $2B  Len: 2  Time: 2
 			// Affects flags S, Z, and C.
@@ -1435,199 +1284,6 @@ unsigned int run_opcode()
 				cycles = 2;
 				break;
 			}
-			// ORA: Performs bitwise OR with the accumulator.
-			// Immediate ORA. Hex: $09  Len: 2  Time: 2
-			// Affects flags S and Z.
-			case 0x09:
-			{
-				unsigned int address = immediate_address();
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				bitwise_or(load_byte);
-				program_counter++;
-				cycles = 2;
-				break;
-			}
-			// Zero page ORA. Hex: $05  Len: 2  Time: 3
-			// Affects flags S and Z.
-			case 0x05:
-			{
-				unsigned int address = zero_page_address();
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				bitwise_or(load_byte);
-				program_counter++;
-				cycles = 3;
-				break;
-			}
-			// Zero page,X ORA. Hex: $15  Len: 2  Time: 4
-			// Affects flags S and Z.
-			case 0x15:
-			{
-				unsigned int address = zero_page_indexed_address(x_register);
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				bitwise_or(load_byte);
-				program_counter++;
-				cycles = 4;
-				break;
-			}
-			// Absolute ORA. Hex: $0D  Len: 3  Time: 4
-			// Affects flags S and Z.
-			case 0x0D:
-			{
-				unsigned int address = absolute_address();
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				bitwise_or(load_byte);
-				program_counter += 2;
-				cycles = 4;
-				break;
-			}
-			// Absolute,X ORA. Hex: $1D  Len: 3  Time: 4 + 1 [if crossed page boundary]
-			// Affects flags S and Z.
-			case 0x1D:
-			{
-				cycles = 4;
-				unsigned int address = absolute_indexed_address(x_register, &cycles);
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				bitwise_or(load_byte);
-				program_counter += 2;
-				break;
-			}
-			// Absolute,Y ORA. Hex: $19  Len: 3  Time: 4 + 1 [if crossed page boundary]
-			// Affects flags S and Z.
-			case 0x19:
-			{
-				cycles = 4;
-				unsigned int address = absolute_indexed_address(y_register, &cycles);
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				bitwise_or(load_byte);
-				program_counter += 2;
-				break;
-			}
-			// Indirect,X ORA. Hex: $01  Len: 2  Time: 6
-			// Affects flags S and Z.
-			case 0x01:
-			{
-				unsigned int address = preindexed_indirect_address();
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				bitwise_or(load_byte);
-				program_counter++;
-				cycles = 6;
-				break;
-			}
-			// Indirect,Y ORA. Hex: $11  Len: 2  Time: 5 + 1 [if crossed page boundary]
-			case 0x11:
-			{
-				cycles = 5;
-				unsigned int address = postindexed_indirect_address(&cycles);
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				bitwise_or(load_byte);
-				program_counter++;
-				break;
-			}
-			// EOR: Perform bitwise XOR with the accumulator.
-			// Immediate EOR. Hex: $49  Len: 2  Time: 2
-			// Affect S and Z.
-			case 0x49:
-			{
-				unsigned int address = immediate_address();
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				bitwise_xor(load_byte);
-				program_counter++;
-				cycles = 2;
-				break;
-			}
-			// Zero page EOR. Hex: $45  Len: 2  Time: 3
-			// Affects S and Z.
-			case 0x45:
-			{
-				unsigned int address = zero_page_address();
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				bitwise_xor(load_byte);
-				program_counter++;
-				cycles = 3;
-				break;
-			}
-			// Zero page,X EOR. Hex: $55  Len: 2  Time: 4
-			// Affects S and Z.
-			case 0x55:
-			{
-				unsigned int address = zero_page_indexed_address(x_register);
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				bitwise_xor(load_byte);
-				program_counter++;
-				cycles = 4;
-				break;
-			}
-			// Absolute EOR. Hex: $4D  Len: 3  Time: 4
-			// Affects flags S and Z.
-			case 0x4D:
-			{
-				unsigned int address = absolute_address();
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				bitwise_xor(load_byte);
-				program_counter += 2;
-				cycles = 4;
-				break;
-			}
-			// Absolute,X EOR. Hex: $5D  Len: 3  Time: 4 + 1 [if crossed page boundary]
-			// Affects flags S and Z.
-			case 0x5D:
-			{
-				cycles = 4;
-				unsigned int address = absolute_indexed_address(x_register, &cycles);
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				bitwise_xor(load_byte);
-				program_counter += 2;
-				break;
-			}
-			// Absolute,Y EOR. Hex: $59  Len: 3  Time: 4 + 1 [if crossed page boundary]
-			// Affects flags S and Z.
-			case 0x59:
-			{
-				cycles = 4;
-				unsigned int address = absolute_indexed_address(y_register, &cycles);
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				bitwise_xor(load_byte);
-				program_counter += 2;
-				break;
-			}
-			// Indirect,X EOR. Hex: $41  Len: 2  Time: 6
-			// Affects flags S and Z.
-			case 0x41:
-			{
-				unsigned int address = preindexed_indirect_address();
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				bitwise_xor(load_byte);
-				program_counter += 2;
-				cycles = 6;
-				break;
-			}
-			// Indirect,Y EOR. Hex: $51  Len: 2  Time: 5 + 1 [if crossed page boundary]
-			// Affects flags S and Z.
-			case 0x51:
-			{
-				cycles = 5;
-				unsigned int address = postindexed_indirect_address(&cycles);
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				bitwise_xor(load_byte);
-				program_counter++;
-				break;
-			}
 			// LSR: Logical shift right.
 			// Accumulator LSR. Hex: $4A  Len: 1  Time: 2
 			// Affects flags S, Z, and C.
@@ -1635,58 +1291,6 @@ unsigned int run_opcode()
 			{
 				accumulator = logical_shift_right(accumulator);
 				cycles = 2;
-				break;
-			}
-			// Zero page LSR. Hex: $46  Len: 2  Time: 5
-			// Affects flags S, Z, and C.
-			case 0x46:
-			{
-				unsigned int address = zero_page_address();
-				unsigned char target;
-				access_cpu_memory(&target, address, READ);
-				target = logical_shift_right(target);
-				access_cpu_memory(&target, address, WRITE);
-				program_counter++;
-				cycles = 5;
-				break;
-			}
-			// Zero page,X LSR. Hex: $56  Len: 2  Time: 6
-			// Affects flags S, Z, and C.
-			case 0x56:
-			{
-				unsigned int address = zero_page_indexed_address(x_register);
-				unsigned char target;
-				access_cpu_memory(&target, address, READ);
-				target = logical_shift_right(target);
-				access_cpu_memory(&target, address, WRITE);
-				program_counter++;
-				cycles = 6;
-				break;
-			}
-			// Absolute LSR. Hex: $4E  Len: 3  Time: 6
-			// Affects flags S, Z, and C.
-			case 0x4E:
-			{
-				unsigned int address = absolute_address();
-				unsigned char target;
-				access_cpu_memory(&target, address, READ);
-				target = logical_shift_right(target);
-				access_cpu_memory(&target, address, WRITE);
-				program_counter += 2;
-				cycles = 6;
-				break;
-			}
-			// Absolute,X LSR. Hex: $5E  Len: 3  Time: 7
-			// Affects flags S, Z, and C.
-			case 0x5E:
-			{
-				unsigned int address = absolute_address() + x_register;
-				unsigned char target;
-				access_cpu_memory(&target, address, READ);
-				target = logical_shift_right(target);
-				access_cpu_memory(&target, address, WRITE);
-				program_counter += 2;
-				cycles = 7;
 				break;
 			}
 			// ASL: Arithmetic shift left.
@@ -1698,57 +1302,6 @@ unsigned int run_opcode()
 				cycles = 2;
 				break;
 			}
-			// Zero page ASL. Hex: $06  Len: 2  Time: 5
-			// Affects flags S, Z, and C.
-			case 0x06:
-			{
-				unsigned int address = zero_page_address();
-				unsigned char target;
-				access_cpu_memory(&target, address, READ);
-				target = arithmetic_shift_left(target);
-				access_cpu_memory(&target, address, WRITE);
-				program_counter++;
-				cycles = 5;
-				break;
-			}
-			// Zero page,X ASL. Hex: $16  Len: 2  Time: 6
-			case 0x16:
-			{
-				unsigned int address = zero_page_indexed_address(x_register);
-				unsigned char target;
-				access_cpu_memory(&target, address, READ);
-				target = arithmetic_shift_left(target);
-				access_cpu_memory(&target, address, WRITE);
-				program_counter++;
-				cycles = 6;
-				break;
-			}
-			// Absolute ASL. Hex: $0E  Len: 3  Time: 6
-			// Affects flags S, Z, and C.
-			case 0x0E:
-			{
-				unsigned int address = absolute_address();
-				unsigned char target;
-				access_cpu_memory(&target, address, READ);
-				target = arithmetic_shift_left(target);
-				access_cpu_memory(&target, address, WRITE);
-				program_counter += 2;
-				cycles = 6;
-				break;
-			}
-			// Absolute,X ASL. Hex: $1E  Len: 3  Time: 7
-			// Affects flags S, Z, and C.
-			case 0x1E:
-			{
-				unsigned int address = absolute_address() + x_register;
-				unsigned char target;
-				access_cpu_memory(&target, address, READ);
-				target = arithmetic_shift_left(target);
-				access_cpu_memory(&target, address, WRITE);
-				program_counter += 2;
-				cycles = 7;
-				break;
-			}
 			// ROL: Rotate left. The byte that falls off the edge goes into carry, and the carry bit goes in the other side.
 			// Accumulator ROL. Hex: $2A  Len: 1  Time: 2
 			// Affects flags S, Z, and C.
@@ -1756,58 +1309,6 @@ unsigned int run_opcode()
 			{
 				accumulator = rotate_left(accumulator);
 				cycles = 2;
-				break;
-			}
-			// Zero page ROL. Hex: $26  Len: 2  Time: 5
-			// Affects flags S, Z, and C.
-			case 0x26:
-			{
-				unsigned int address = zero_page_address();
-				unsigned char target;
-				access_cpu_memory(&target, address, READ);
-				target = rotate_left(target);
-				access_cpu_memory(&target, address, WRITE);
-				program_counter++;
-				cycles = 5;
-				break;
-			}
-			// Zero page,X ROL. Hex: $36  Len: 2  Time: 6
-			// Affects flags S, Z, and C.
-			case 0x36:
-			{
-				unsigned int address = zero_page_indexed_address(x_register);
-				unsigned char target;
-				access_cpu_memory(&target, address, READ);
-				target = rotate_left(target);
-				access_cpu_memory(&target, address, WRITE);
-				program_counter++;
-				cycles = 6;
-				break;
-			}
-			// Absolute ROL. Hex: $2E  Len: 3  Time: 6
-			// Affects flags S, Z, and C.
-			case 0x2E:
-			{
-				unsigned int address = absolute_address();
-				unsigned char target;
-				access_cpu_memory(&target, address, READ);
-				target = rotate_left(target);
-				access_cpu_memory(&target, address, WRITE);
-				program_counter += 2;
-				cycles = 6;
-				break;
-			}
-			// Absolute,X ROL. Hex: $3E  Len: 3  Time: 7
-			// Affects flags S, Z, and C.
-			case 0x3E:
-			{
-				unsigned int address = absolute_address() + x_register;
-				unsigned char target;
-				access_cpu_memory(&target, address, READ);
-				target = rotate_left(target);
-				access_cpu_memory(&target, address, WRITE);
-				program_counter += 2;
-				cycles = 7;
 				break;
 			}
 			// ROR: Rotate right. The byte that falls off the edge goes into carry, and the carry bit goes in the other side.
@@ -1819,62 +1320,10 @@ unsigned int run_opcode()
 				cycles = 2;
 				break;
 			}
-			// Zero page ROR. Hex: $66  Len: 2  Time: 5
-			// Affects flags S, Z, and C.
-			case 0x66:
-			{
-				unsigned int address = zero_page_address();
-				unsigned char target;
-				access_cpu_memory(&target, address, READ);
-				target = rotate_right(target);
-				access_cpu_memory(&target, address, WRITE);
-				program_counter++;
-				cycles = 5;
-				break;
-			}
-			// Zero page,X ROR. Hex: $76  Len: 2  Time: 6
-			// Affects flags S, Z, and C.
-			case 0x76:
-			{
-				unsigned int address = zero_page_indexed_address(x_register);
-				unsigned char target;
-				access_cpu_memory(&target, address, READ);
-				target = rotate_right(target);
-				access_cpu_memory(&target, address, WRITE);
-				program_counter++;
-				cycles = 6;
-				break;
-			}
-			// Absolute ROR. Hex: $6E  Len: 3  Time: 6
-			// Affects flags S, Z, and C.
-			case 0x6E:
-			{
-				unsigned int address = absolute_address();
-				unsigned char target;
-				access_cpu_memory(&target, address, READ);
-				target = rotate_right(target);
-				access_cpu_memory(&target, address, WRITE);
-				program_counter += 2;
-				cycles = 6;
-				break;
-			}
-			// Absolute,X ROR. Hex: $7E  Len: 3  Time: 7
-			// Affects flags S, Z, and C.
-			case 0x7E:
-			{
-				unsigned int address = absolute_address() + x_register;
-				unsigned char target;
-				access_cpu_memory(&target, address, READ);
-				target = rotate_right(target);
-				access_cpu_memory(&target, address, WRITE);
-				program_counter += 2;
-				cycles = 7;
-				break;
-			}
 			// CMP: Compares the accumulator to a value, and sets the sign, carry, and zero flags accordingly.
 			// Immediate CMP. Hex: $C9  Len: 2  Time: 2
 			// Affects flags S, Z, and C.
-			case 0xC9:
+			/*case 0xC9:
 			{
 				unsigned int address = immediate_address();
 				unsigned char load_byte;
@@ -1967,7 +1416,7 @@ unsigned int run_opcode()
 				compare_register(accumulator, load_byte);
 				program_counter++;
 				break;
-			}
+			}*/
 			// CPX: Compares the X register to a value, and sets the sign, carry, and zero flags accordingly.
 			// Immediate CPX. Hex: $E0  Len: 2  Time: 2
 			// Affects flags S, Z, and C.
@@ -2067,53 +1516,6 @@ unsigned int run_opcode()
 				status_flags = (status_flags & 0b00111111) | (load_byte & 0b11000000);
 				program_counter += 2;
 				cycles = 4;
-				break;
-			}
-			// Absolute,X LDA. Hex: $BD  Len: 3  Time: 4 + 1 [if crossed page boundary]
-			// Affects flags S and Z.
-			case 0xBD:
-			{
-				cycles = 4;
-				unsigned int address = absolute_indexed_address(x_register, &cycles);
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				load_register(&accumulator, load_byte);
-				program_counter += 2;
-				break;
-			}
-			// Absolute,Y LDA. Hex: $B9  Len: 3  Time: 4 + 1 [if crossed page boundary]
-			// Affects flags S and Z.
-			case 0xB9:
-			{
-				cycles = 4;
-				unsigned int address = absolute_indexed_address(y_register, &cycles);
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				load_register(&accumulator, load_byte);
-				program_counter += 2;
-				break;
-			}
-			// Indirect,X LDA. Hex: $A1  Len: 2  Time: 6
-			case 0xA1:
-			{
-				unsigned int address = preindexed_indirect_address();
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				load_register(&accumulator, load_byte);
-				program_counter++;
-				cycles = 6;
-				break;
-			}
-			// Indirect,Y LDA. Hex: $B1  Len: 2  Time: 5 + 1 [if crossed page boundary]
-			// Affects flags S and Z.
-			case 0xB1:
-			{
-				cycles = 5;
-				unsigned int address = postindexed_indirect_address(&cycles);
-				unsigned char load_byte;
-				access_cpu_memory(&load_byte, address, READ);
-				load_register(&accumulator, load_byte);
-				program_counter++;
 				break;
 			}
 			// Unofficial opcode LAX.
@@ -2245,77 +1647,6 @@ unsigned int run_opcode()
 				access_cpu_memory(&load_byte, address, READ);
 				load_register(&y_register, load_byte);
 				program_counter += 2;
-				break;
-			}
-			// STA: Stores the accumulator in the address specified by the operand.
-			// Zero page STA. Hex: $85  Len: 2  Time: 3
-			case 0x85:
-			{
-				unsigned int address = zero_page_address();
-				unsigned char data = accumulator;
-				access_cpu_memory(&data, address, WRITE);
-				program_counter++;
-				cycles = 3;
-				break;
-			}
-			// Zero page,X STA. Hex: $95  Len: 2  Time: 4
-			case 0x95:
-			{
-				unsigned int address = zero_page_indexed_address(x_register);
-				unsigned char data = accumulator;
-				access_cpu_memory(&data, address, WRITE);
-				program_counter++;
-				cycles = 4;
-				break;
-			}
-			// Absolute STA. Hex: $8D  Len: 3  Time: 4
-			case 0x8D:
-			{
-				unsigned int address = absolute_address();
-				unsigned char data = accumulator;
-				access_cpu_memory(&data, address, WRITE);
-				program_counter += 2;
-				cycles = 4;
-				break;
-			}
-			// Absolute,X STA. Hex: $9D  Len: 3  Time: 5
-			case 0x9D:
-			{
-				unsigned int address = absolute_address() + x_register;
-				unsigned char data = accumulator;
-				access_cpu_memory(&data, address, WRITE);
-				program_counter += 2;
-				cycles = 5;
-				break;
-			}
-			// Absolute,Y STA. Hex: $99  Len: 3  Time: 5
-			case 0x99:
-			{
-				unsigned int address = absolute_address() + y_register;
-				unsigned char data = accumulator;
-				access_cpu_memory(&data, address, WRITE);
-				program_counter += 2;
-				cycles = 5;
-				break;
-			}
-			// Indirect,X STA. Hex: $81  Len: 2  Time: 6
-			case 0x81:
-			{
-				unsigned int address = preindexed_indirect_address();
-				unsigned char data = accumulator;
-				access_cpu_memory(&data, address, WRITE);
-				program_counter++;
-				cycles = 6;
-				break;
-			}
-			// Indirect,Y STA. Hex: $91  Len: 2  Time: 6
-			case 0x91:
-			{
-				unsigned int address = zero_page_indirect_address() + y_register;
-				unsigned char data = accumulator;
-				access_cpu_memory(&data, address, WRITE);
-				program_counter++;
-				cycles = 6;
 				break;
 			}
 			// STX: Stores the X register in the address specified by the operand.
@@ -2525,29 +1856,57 @@ void cpu_init()
 	decode_lines_second_half = malloc(sizeof(struct DecodeLine) * SECOND_HALF_DECODE_LINES);
 	for (unsigned int i = 0; i < FIRST_HALF_DECODE_LINES; i++)
 	{
-		decode_lines_first_half[i] = (struct DecodeLine) { .opcode_bits = 0b00000000, .opcode_mask = 0b00000000, .timing = 0b000000, .push_pull_negate = 0, .rom_op = do_nothing };
+		decode_lines_first_half[i] = (struct DecodeLine) { .opcode_bits = 0b00000000, .opcode_mask = 0b00000000, .timing = 0b000000, .rom_op = do_nothing };
 	}
 	for (unsigned int i = 0; i < SECOND_HALF_DECODE_LINES; i++)
 	{
-		decode_lines_second_half[i] = (struct DecodeLine) { .opcode_bits = 0b00000000, .opcode_mask = 0b00000000, .timing = 0b000000, .push_pull_negate = 0, .rom_op = do_nothing };
+		decode_lines_second_half[i] = (struct DecodeLine) { .opcode_bits = 0b00000000, .opcode_mask = 0b00000000, .timing = 0b000000, .rom_op = do_nothing };
 	}
 	
-	decode_lines_first_half[0] = (struct DecodeLine) { .rom_op = op_T3_mem_zp_idx, .opcode_bits = 0b00010100, .opcode_mask = 0b00011100, .timing = 0b001000, .push_pull_negate = 0 };
-	decode_lines_first_half[1] = (struct DecodeLine) { .rom_op = op_T2_abs, .opcode_bits = 0b00001100, .opcode_mask = 0b00011100, .timing = 0b000100, .push_pull_negate = 0 };
-	decode_lines_first_half[2] = (struct DecodeLine) { .rom_op = op_T3_mem_abs, .opcode_bits = 0b00001100, .opcode_mask = 0b00011100, .timing = 0b001000, .push_pull_negate = 0 };
+	decode_lines_first_half[0] = (struct DecodeLine) { .rom_op = op_T3_mem_zp_idx, .opcode_bits = 0b00010100, .opcode_mask = 0b00011100, .timing = 0b001000};
+	decode_lines_first_half[1] = (struct DecodeLine) { .rom_op = op_T2_abs, .opcode_bits = 0b00001100, .opcode_mask = 0b00011100, .timing = 0b000100};
+	decode_lines_first_half[2] = (struct DecodeLine) { .rom_op = op_T2_abs_x, .opcode_bits = 0b00011100, .opcode_mask = 0b00011100, .timing = 0b000100};
+	decode_lines_first_half[3] = (struct DecodeLine) { .rom_op = op_T2_abs_y, .opcode_bits = 0b00011001, .opcode_mask = 0b00011101, .timing = 0b000100};
+	decode_lines_first_half[4] = (struct DecodeLine) { .rom_op = op_T3_mem_abs, .opcode_bits = 0b00001100, .opcode_mask = 0b00011100, .timing = 0b001000};
+	decode_lines_first_half[5] = (struct DecodeLine) { .rom_op = op_T0_sta, .opcode_bits = 0b10000001, .opcode_mask = 0b11100001, .timing = 0b000001};
+	decode_lines_first_half[6] = (struct DecodeLine) { .rom_op = op_T0_inc, .opcode_bits = 0b11100010, .opcode_mask = 0b11100010, .timing = 0b000001};
+	decode_lines_first_half[7] = (struct DecodeLine) { .rom_op = op_T0_dec, .opcode_bits = 0b11000010, .opcode_mask = 0b11100010, .timing = 0b000001};
+	decode_lines_first_half[8] = (struct DecodeLine) { .rom_op = op_T0_asl, .opcode_bits = 0b00000010, .opcode_mask = 0b11100010, .timing = 0b000001};
+	decode_lines_first_half[9] = (struct DecodeLine) { .rom_op = op_T0_lsr, .opcode_bits = 0b01000010, .opcode_mask = 0b11100010, .timing = 0b000001};
+	decode_lines_first_half[10] = (struct DecodeLine) { .rom_op = op_T0_rol, .opcode_bits = 0b00100010, .opcode_mask = 0b11100010, .timing = 0b000001};
+	decode_lines_first_half[11] = (struct DecodeLine) { .rom_op = op_T0_ror, .opcode_bits = 0b01100010, .opcode_mask = 0b11100010, .timing = 0b000001};
 	
 	// op-push/pull
 	// TODO: fill in the function for this
-	decode_lines_second_half[0] = (struct DecodeLine) { .rom_op = do_nothing, .opcode_bits = 0b00001000, .opcode_mask = 0b10011111, .timing = 0, .push_pull_negate = 0 };
-	decode_lines_second_half[1] = (struct DecodeLine) { .rom_op = op_T0, .opcode_bits = 0b00000000, .opcode_mask = 0b00000000, .timing = 0b000001, .push_pull_negate = 0 };
-	decode_lines_second_half[2] = (struct DecodeLine) { .rom_op = op_clv, .opcode_bits = 0b10111000, .opcode_mask = 0b11111111, .timing = 0, .push_pull_negate = 0 };
-	decode_lines_second_half[3] = (struct DecodeLine) { .rom_op = op_T0_clc_sec, .opcode_bits = 0b00011000, .opcode_mask = 0b11011111, .timing = 0b000001, .push_pull_negate = 0 };
-	decode_lines_second_half[4] = (struct DecodeLine) { .rom_op = op_T0_cli_sei, .opcode_bits = 0b01011000, .opcode_mask = 0b11011111, .timing = 0b000001, .push_pull_negate = 0 };
-	decode_lines_second_half[5] = (struct DecodeLine) { .rom_op = op_T0_cld_sed, .opcode_bits = 0b11011000, .opcode_mask = 0b11011111, .timing = 0b000001, .push_pull_negate = 0 };
-	decode_lines_second_half[6] = (struct DecodeLine) { .rom_op = op_T0_lda, .opcode_bits = 0b10100001, .opcode_mask = 0b11100001, .timing = 0b000001, .push_pull_negate = 0 };
-	decode_lines_second_half[7] = (struct DecodeLine) { .rom_op = op_T2_acc, .opcode_bits = 0b00000001, .opcode_mask = 0b00000001, .timing = 0b000100, .push_pull_negate = 0 };
-	decode_lines_second_half[8] = (struct DecodeLine) { .rom_op = op_T2_mem_zp, .opcode_bits = 0b00000100, .opcode_mask = 0b00011100, .timing = 0b000100, .push_pull_negate = 0 };
-	decode_lines_second_half[9] = (struct DecodeLine) { .rom_op = op_T2_ADL_ADD, .opcode_bits = 0b00000000, .opcode_mask = 0b00001000, .timing = 0b000100, .push_pull_negate = 0 };
+	decode_lines_second_half[0] = (struct DecodeLine) { .rom_op = do_nothing, .opcode_bits = 0b00001000, .opcode_mask = 0b10011111, .timing = 0b000000};
+	decode_lines_second_half[1] = (struct DecodeLine) { .rom_op = op_T0, .opcode_bits = 0b00000000, .opcode_mask = 0b00000000, .timing = 0b000001};
+	decode_lines_second_half[2] = (struct DecodeLine) { .rom_op = op_clv, .opcode_bits = 0b10111000, .opcode_mask = 0b11111111, .timing = 0b000000};
+	decode_lines_second_half[3] = (struct DecodeLine) { .rom_op = op_T0_clc_sec, .opcode_bits = 0b00011000, .opcode_mask = 0b11011111, .timing = 0b000001};
+	decode_lines_second_half[4] = (struct DecodeLine) { .rom_op = op_T0_cli_sei, .opcode_bits = 0b01011000, .opcode_mask = 0b11011111, .timing = 0b000001};
+	decode_lines_second_half[5] = (struct DecodeLine) { .rom_op = op_T0_cld_sed, .opcode_bits = 0b11011000, .opcode_mask = 0b11011111, .timing = 0b000001};
+	decode_lines_second_half[6] = (struct DecodeLine) { .rom_op = op_T0_lda, .opcode_bits = 0b10100001, .opcode_mask = 0b11100001, .timing = 0b000001};
+	decode_lines_second_half[7] = (struct DecodeLine) { .rom_op = op_T2_acc, .opcode_bits = 0b00000001, .opcode_mask = 0b00000001, .timing = 0b000100};
+	decode_lines_second_half[8] = (struct DecodeLine) { .rom_op = op_T2_mem_zp, .opcode_bits = 0b00000100, .opcode_mask = 0b00011100, .timing = 0b000100};
+	decode_lines_second_half[9] = (struct DecodeLine) { .rom_op = op_T2_ADL_ADD, .opcode_bits = 0b00000000, .opcode_mask = 0b00001000, .timing = 0b000100};
+	decode_lines_second_half[10] = (struct DecodeLine) { .rom_op = op_T3_abs_idx, .opcode_bits = 0b00011000, .opcode_mask = 0b00011000, .timing = 0b001000};
+	decode_lines_second_half[11] = (struct DecodeLine) { .rom_op = op_T4_abs_idx, .opcode_bits = 0b00011000, .opcode_mask = 0b00011000, .timing = 0b010000};
+	decode_lines_second_half[12] = (struct DecodeLine) { .rom_op = op_T2_ind_y, .opcode_bits = 0b00010001, .opcode_mask = 0b00011101, .timing = 0b000100};
+	decode_lines_second_half[13] = (struct DecodeLine) { .rom_op = op_T3_ind_y, .opcode_bits = 0b00010001, .opcode_mask = 0b00011101, .timing = 0b001000};
+	decode_lines_second_half[14] = (struct DecodeLine) { .rom_op = op_T4_ind_y, .opcode_bits = 0b00010001, .opcode_mask = 0b00011101, .timing = 0b010000};
+	decode_lines_second_half[15] = (struct DecodeLine) { .rom_op = op_T5_ind_y, .opcode_bits = 0b00010001, .opcode_mask = 0b00011101, .timing = 0b100000};
+	decode_lines_second_half[16] = (struct DecodeLine) { .rom_op = op_T2_ind_x, .opcode_bits = 0b00000001, .opcode_mask = 0b00011101, .timing = 0b000100};
+	decode_lines_second_half[17] = (struct DecodeLine) { .rom_op = op_T3_ind_x, .opcode_bits = 0b00000001, .opcode_mask = 0b00011101, .timing = 0b001000};
+	decode_lines_second_half[18] = (struct DecodeLine) { .rom_op = op_T4_ind_x, .opcode_bits = 0b00000001, .opcode_mask = 0b00011101, .timing = 0b010000};
+	decode_lines_second_half[19] = (struct DecodeLine) { .rom_op = op_T5_ind_x, .opcode_bits = 0b00000001, .opcode_mask = 0b00011101, .timing = 0b100000};
+	decode_lines_second_half[20] = (struct DecodeLine) { .rom_op = op_T0_and, .opcode_bits = 0b00100001, .opcode_mask = 0b11100001, .timing = 0b000001};
+	decode_lines_second_half[21] = (struct DecodeLine) { .rom_op = op_T0_ora, .opcode_bits = 0b00000001, .opcode_mask = 0b11100001, .timing = 0b000001};
+	decode_lines_second_half[22] = (struct DecodeLine) { .rom_op = op_T0_eor, .opcode_bits = 0b01000001, .opcode_mask = 0b11100001, .timing = 0b000001};
+	decode_lines_second_half[23] = (struct DecodeLine) { .rom_op = op_T0_adc, .opcode_bits = 0b01100001, .opcode_mask = 0b11100001, .timing = 0b000001};
+	decode_lines_second_half[24] = (struct DecodeLine) { .rom_op = op_T0_sbc, .opcode_bits = 0b11100001, .opcode_mask = 0b11100001, .timing = 0b000001};
+	decode_lines_second_half[25] = (struct DecodeLine) { .rom_op = op_T0_cmp, .opcode_bits = 0b11000001, .opcode_mask = 0b11100001, .timing = 0b000001};
+	decode_lines_second_half[26] = (struct DecodeLine) { .rom_op = op_sta, .opcode_bits = 0b10000001, .opcode_mask = 0b11100001, .timing = 0b000000};
+	decode_lines_second_half[27] = (struct DecodeLine) { .rom_op = op_lsr_ror_dec_inc, .opcode_bits = 0b01000010, .opcode_mask = 0b01000010, .timing = 0b000000};
+	decode_lines_second_half[28] = (struct DecodeLine) { .rom_op = op_asl_rol, .opcode_bits = 0b00000010, .opcode_mask = 0b11000010, .timing = 0b000000};
 	
 	reset_cpu();
 }
