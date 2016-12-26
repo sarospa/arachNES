@@ -175,26 +175,27 @@ void push_audio()
 	}
 }
 
+void process_ppu_tick()
+{
+	unsigned char pixel_data = ppu_tick();
+	if (render_buffer_count < RENDER_BUFFER_MAX)
+	{
+		render_buffer[render_buffer_count] = pixel_data;
+		render_buffer_count++;
+	}
+}
+
 void nes_loop()
 {
-	unsigned int cycles = run_opcode();
-	
-	for (unsigned int i = 0; i < cycles; i++)
-	{
-		apu_tick();
-	}
-	
 	// PPU runs at triple the speed of the CPU.
 	// Call PPU tick three times for every CPU cycle.
-	for (unsigned int i = 0; i < (cycles * 3); i++)
-	{
-		unsigned char pixel_data = ppu_tick();
-		if (render_buffer_count < RENDER_BUFFER_MAX)
-		{
-			render_buffer[render_buffer_count] = pixel_data;
-			render_buffer_count++;
-		}
-	}
+	// APU runs at half the CPU speed, but I'm doing half
+	// an APU cycle per tick here.
+	process_ppu_tick();
+	process_ppu_tick();
+	process_ppu_tick();
+	cpu_tick();
+	apu_tick();
 }
 
 void save_state()

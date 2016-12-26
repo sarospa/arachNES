@@ -27,6 +27,11 @@ unsigned char oam_address;
 unsigned char ppu_data_buffer;
 
 unsigned int register_accessed;
+// Flag to indicate whether PPUSTATUS was just read. Due to
+// a quirk of the PPU, if the vblank flag would be set during
+// this period, it is immediately cleared.
+unsigned char status_read = 0;
+unsigned char reset_cycle = 1;
 
 // Controls the write mode of PPUSCROLL and PPUADDRESS
 unsigned char write_toggle;
@@ -129,6 +134,10 @@ void access_ppu_register(unsigned char* data, unsigned int ppu_register, unsigne
 					// Clear the vblank flag after PPUSTATUS read.
 					ppu_status = ppu_status & 0b01111111;
 					nmi_occurred = nmi_occurred & 0b10;
+					// Right now I'm assuming that the vblank can be cleared prematurely as long as
+					// the CPU is 'pointing at' PPUSTATUS. It doesn't appear to work otherwise.
+					// We'll see in due time if I'm proven wrong.
+					status_read = 3;
 				}
 				break;
 			}
@@ -480,6 +489,8 @@ void ppu_save_state(FILE* save_file)
 	fwrite(&pending_nmi, sizeof(char), 1, save_file);
 	fwrite(&nmi_occurred, sizeof(char), 1, save_file);
 	fwrite(&nmi_output, sizeof(char), 1, save_file);
+	fwrite(&status_read, sizeof(char), 1, save_file);
+	fwrite(&reset_cycle, sizeof(char), 1, save_file);
 	
 	fwrite(ppu_ram, sizeof(char), 0x800, save_file);
 	fwrite(palette_ram, sizeof(char), 0x20, save_file);
@@ -516,6 +527,8 @@ void ppu_load_state(FILE* save_file)
 	fread(&pending_nmi, sizeof(char), 1, save_file);
 	fread(&nmi_occurred, sizeof(char), 1, save_file);
 	fread(&nmi_output, sizeof(char), 1, save_file);
+	fread(&status_read, sizeof(char), 1, save_file);
+	fread(&reset_cycle, sizeof(char), 1, save_file);
 	
 	fread(ppu_ram, sizeof(char), 0x800, save_file);
 	fread(palette_ram, sizeof(char), 0x20, save_file);
@@ -686,9 +699,19 @@ unsigned char ppu_tick()
 	{
 		if (scan_pixel == 1)
 		{
-			// Set vblank
-			ppu_status = ppu_status | 0b10000000;
-			nmi_occurred = nmi_occurred | 0b01;
+			if (reset_cycle)
+			{
+				reset_cycle = 0;
+			}
+			else
+			{
+				// Set vblank. If PPUSTATUS just read, it won't be set.
+				if (!status_read)
+				{
+					ppu_status = ppu_status | 0b10000000;
+					nmi_occurred = nmi_occurred | 0b01;
+				}
+			}
 		}
 	}
 	
@@ -715,6 +738,11 @@ unsigned char ppu_tick()
 	nmi_occurred = ((nmi_occurred & 0b1) << 1) | (nmi_occurred & 0b1);
 	nmi_output = ((nmi_output & 0b1) << 1) | (nmi_output & 0b1);
 	
+	if (status_read > 0)
+	{
+		status_read--;
+	}
+	
 	return pixel_data;
 }
 
@@ -734,7 +762,7 @@ void ppu_init()
 	write_toggle = 0;
 	odd_frame = 0;
 	
-	scanline = 261;
+	scanline = 240;
 	scan_pixel = 0;
 	
 	nmi_occurred = 0;

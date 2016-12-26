@@ -43,7 +43,7 @@ void exit_emulator();
 
 void reset_cpu();
 void cpu_init();
-unsigned int run_opcode();
+void cpu_tick();
 void access_cpu_memory(unsigned char* data, unsigned int address, unsigned char write);
 
 void stack_dump();
