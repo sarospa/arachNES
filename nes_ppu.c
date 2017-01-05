@@ -32,6 +32,9 @@ unsigned int register_accessed;
 // this period, it is immediately cleared.
 unsigned char status_read = 0;
 unsigned char reset_cycle = 1;
+// FCEUX seems to skip the first vblank, so I should too in order to be
+// compatible with FCEUX movies.
+unsigned char vblank_skip = 1;
 
 // Controls the write mode of PPUSCROLL and PPUADDRESS
 unsigned char write_toggle;
@@ -705,11 +708,15 @@ unsigned char ppu_tick()
 			}
 			else
 			{
-				// Set vblank. If PPUSTATUS just read, it won't be set.
-				if (!status_read)
+				
+				if (!vblank_skip)
 				{
 					ppu_status = ppu_status | 0b10000000;
 					nmi_occurred = nmi_occurred | 0b01;
+				}
+				else
+				{
+					vblank_skip = 0;
 				}
 			}
 		}

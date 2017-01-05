@@ -12,7 +12,7 @@ unsigned const char WRITE = 1;
 unsigned const char READ = 0;
 unsigned const int RAM_SIZE = 2048;
 unsigned const int FIRST_HALF_DECODE_LINES = 21;
-unsigned const int SECOND_HALF_DECODE_LINES = 75;
+unsigned const int SECOND_HALF_DECODE_LINES = 74;
 
 // Struct for holding data on a decode ROM line.
 // Each line has an opcode condition for turning on, in which each bit
@@ -1177,7 +1177,7 @@ void execute_opcode()
 		access_cpu_memory(&data_bus, address_bus, READ);
 	}
 	
-	//printf("%04X: OP:%02X A:%02X X:%02X Y:%02X D:%02X ADL:%02X ADH:%02X ADB:%04X RW:%02X T:%02X CYC:%d\n", program_counter, execute_bus, accumulator, x_register, y_register, data_bus, address_low_bus, address_high_bus, address_bus, prev_read_write, timing_cycle, total_cycles);
+	//printf("%04X: OP:%02X A:%02X X:%02X Y:%02X D:%02X ADL:%02X ADH:%02X ADB:%04X RW:%02X T:%02X CYC:%d\n", program_counter - 1, execute_bus, accumulator, x_register, y_register, data_bus, address_low_bus, address_high_bus, address_bus, prev_read_write, timing_cycle, total_cycles);
 	
 	// Assuming the default behavior is to shift to the next timing cycle.
 	next_timing_cycle = (timing_cycle << 1) & 0b111111;
@@ -1342,15 +1342,7 @@ void cpu_init()
 	// should be clear enough what each one is for.
 	decode_lines_first_half = malloc(sizeof(struct DecodeLine) * FIRST_HALF_DECODE_LINES);
 	decode_lines_second_half = malloc(sizeof(struct DecodeLine) * SECOND_HALF_DECODE_LINES);
-	for (unsigned int i = 0; i < FIRST_HALF_DECODE_LINES; i++)
-	{
-		decode_lines_first_half[i] = (struct DecodeLine) { .opcode_bits = 0b00000000, .opcode_mask = 0b00000000, .timing = 0b000000, .rom_op = do_nothing };
-	}
-	for (unsigned int i = 0; i < SECOND_HALF_DECODE_LINES; i++)
-	{
-		decode_lines_second_half[i] = (struct DecodeLine) { .opcode_bits = 0b00000000, .opcode_mask = 0b00000000, .timing = 0b000000, .rom_op = do_nothing };
-	}
-	
+
 	decode_lines_first_half[0] = (struct DecodeLine) { .rom_op = op_T3_mem_zp_idx, .opcode_bits = 0b00010100, .opcode_mask = 0b00011100, .timing = 0b001000};
 	decode_lines_first_half[1] = (struct DecodeLine) { .rom_op = op_T2_abs, .opcode_bits = 0b00001100, .opcode_mask = 0b00011100, .timing = 0b000100};
 	decode_lines_first_half[2] = (struct DecodeLine) { .rom_op = op_T2_abs_x, .opcode_bits = 0b00011100, .opcode_mask = 0b00011100, .timing = 0b000100};
@@ -1415,38 +1407,38 @@ void cpu_init()
 	decode_lines_second_half[39] = (struct DecodeLine) { .rom_op = op_sta, .opcode_bits = 0b10000100, .opcode_mask = 0b11100101, .timing = 0b000000};
 	decode_lines_second_half[40] = (struct DecodeLine) { .rom_op = op_T0_cpx, .opcode_bits = 0b11100100, .opcode_mask = 0b11110111, .timing = 0b000001};
 	decode_lines_second_half[41] = (struct DecodeLine) { .rom_op = op_T0_cpy, .opcode_bits = 0b11000100, .opcode_mask = 0b11110111, .timing = 0b000001};
-	decode_lines_second_half[43] = (struct DecodeLine) { .rom_op = op_T0_bit, .opcode_bits = 0b00100100, .opcode_mask = 0b11110111, .timing = 0b000001};
-	decode_lines_second_half[44] = (struct DecodeLine) { .rom_op = op_T2_imm, .opcode_bits = 0b10000000, .opcode_mask = 0b10011101, .timing = 0b000100};
-	decode_lines_second_half[45] = (struct DecodeLine) { .rom_op = op_T0_ldx, .opcode_bits = 0b10100010, .opcode_mask = 0b11111111, .timing = 0b000001};
-	decode_lines_second_half[46] = (struct DecodeLine) { .rom_op = op_T0_ldy, .opcode_bits = 0b10100000, .opcode_mask = 0b11111111, .timing = 0b000001};
-	decode_lines_second_half[47] = (struct DecodeLine) { .rom_op = op_T0_cpy, .opcode_bits = 0b11000000, .opcode_mask = 0b11111111, .timing = 0b000001};
-	decode_lines_second_half[48] = (struct DecodeLine) { .rom_op = op_T0_cpx, .opcode_bits = 0b11100000, .opcode_mask = 0b11111111, .timing = 0b000001};
-	decode_lines_second_half[49] = (struct DecodeLine) { .rom_op = op_T2_php_pha, .opcode_bits = 0b00001000, .opcode_mask = 0b10111111, .timing = 0b000100};
-	decode_lines_second_half[50] = (struct DecodeLine) { .rom_op = op_T2_stack_pull, .opcode_bits = 0b00101000, .opcode_mask = 0b10111111, .timing = 0b000100};
-	decode_lines_second_half[51] = (struct DecodeLine) { .rom_op = op_T3_pla_pha, .opcode_bits = 0b00101000, .opcode_mask = 0b10111111, .timing = 0b001000};
-	decode_lines_second_half[52] = (struct DecodeLine) { .rom_op = op_T0_plp, .opcode_bits = 0b00101000, .opcode_mask = 0b11111111, .timing = 0b000001};
-	decode_lines_second_half[53] = (struct DecodeLine) { .rom_op = op_T0_pla, .opcode_bits = 0b01101000, .opcode_mask = 0b11111111, .timing = 0b000001};
-	decode_lines_second_half[54] = (struct DecodeLine) { .rom_op = op_T2_stack_pull, .opcode_bits = 0b01000000, .opcode_mask = 0b11011111, .timing = 0b000100};
-	decode_lines_second_half[55] = (struct DecodeLine) { .rom_op = op_T3_rti_rts, .opcode_bits = 0b01000000, .opcode_mask = 0b11011111, .timing = 0b001000};
-	decode_lines_second_half[56] = (struct DecodeLine) { .rom_op = op_T4_rti_rts, .opcode_bits = 0b01000000, .opcode_mask = 0b11011111, .timing = 0b010000};
-	decode_lines_second_half[57] = (struct DecodeLine) { .rom_op = op_T5_rts, .opcode_bits = 0b01100000, .opcode_mask = 0b11111111, .timing = 0b100000};
-	decode_lines_second_half[58] = (struct DecodeLine) { .rom_op = op_T0_rts, .opcode_bits = 0b01100000, .opcode_mask = 0b11111111, .timing = 0b000001};
-	decode_lines_second_half[59] = (struct DecodeLine) { .rom_op = op_T5_rti, .opcode_bits = 0b01000000, .opcode_mask = 0b11111111, .timing = 0b100000};
-	decode_lines_second_half[60] = (struct DecodeLine) { .rom_op = op_T0_rti, .opcode_bits = 0b01000000, .opcode_mask = 0b11111111, .timing = 0b000001};
-	decode_lines_second_half[61] = (struct DecodeLine) { .rom_op = op_T2_jsr, .opcode_bits = 0b00100000, .opcode_mask = 0b11111111, .timing = 0b000100};
-	decode_lines_second_half[62] = (struct DecodeLine) { .rom_op = op_T3_jsr, .opcode_bits = 0b00100000, .opcode_mask = 0b11111111, .timing = 0b001000};
-	decode_lines_second_half[63] = (struct DecodeLine) { .rom_op = op_T5_jsr_second_half, .opcode_bits = 0b00100000, .opcode_mask = 0b11111111, .timing = 0b100000};
-	decode_lines_second_half[64] = (struct DecodeLine) { .rom_op = op_T0_jsr, .opcode_bits = 0b00100000, .opcode_mask = 0b11111111, .timing = 0b000001};
-	decode_lines_second_half[65] = (struct DecodeLine) { .rom_op = op_T0_txa, .opcode_bits = 0b10001010, .opcode_mask = 0b11111111, .timing = 0b000001};
-	decode_lines_second_half[66] = (struct DecodeLine) { .rom_op = op_T0_tax, .opcode_bits = 0b10101010, .opcode_mask = 0b11111111, .timing = 0b000001};
-	decode_lines_second_half[67] = (struct DecodeLine) { .rom_op = op_T0_dex, .opcode_bits = 0b11001010, .opcode_mask = 0b11111111, .timing = 0b000001};
-	decode_lines_second_half[68] = (struct DecodeLine) { .rom_op = op_T0_inx, .opcode_bits = 0b11101000, .opcode_mask = 0b11111111, .timing = 0b000001};
-	decode_lines_second_half[69] = (struct DecodeLine) { .rom_op = op_T0_txs, .opcode_bits = 0b10011010, .opcode_mask = 0b11111111, .timing = 0b000001};
-	decode_lines_second_half[70] = (struct DecodeLine) { .rom_op = op_T0_tsx, .opcode_bits = 0b10111010, .opcode_mask = 0b11111111, .timing = 0b000001};
-	decode_lines_second_half[71] = (struct DecodeLine) { .rom_op = op_T0_tya, .opcode_bits = 0b10011000, .opcode_mask = 0b11111111, .timing = 0b000001};
-	decode_lines_second_half[72] = (struct DecodeLine) { .rom_op = op_T0_tay, .opcode_bits = 0b10101000, .opcode_mask = 0b11111111, .timing = 0b000001};
-	decode_lines_second_half[73] = (struct DecodeLine) { .rom_op = op_T0_iny, .opcode_bits = 0b11001000, .opcode_mask = 0b11111111, .timing = 0b000001};
-	decode_lines_second_half[74] = (struct DecodeLine) { .rom_op = op_T0_dey, .opcode_bits = 0b10001000, .opcode_mask = 0b11111111, .timing = 0b000001};
+	decode_lines_second_half[42] = (struct DecodeLine) { .rom_op = op_T0_bit, .opcode_bits = 0b00100100, .opcode_mask = 0b11110111, .timing = 0b000001};
+	decode_lines_second_half[43] = (struct DecodeLine) { .rom_op = op_T2_imm, .opcode_bits = 0b10000000, .opcode_mask = 0b10011101, .timing = 0b000100};
+	decode_lines_second_half[44] = (struct DecodeLine) { .rom_op = op_T0_ldx, .opcode_bits = 0b10100010, .opcode_mask = 0b11111111, .timing = 0b000001};
+	decode_lines_second_half[45] = (struct DecodeLine) { .rom_op = op_T0_ldy, .opcode_bits = 0b10100000, .opcode_mask = 0b11111111, .timing = 0b000001};
+	decode_lines_second_half[46] = (struct DecodeLine) { .rom_op = op_T0_cpy, .opcode_bits = 0b11000000, .opcode_mask = 0b11111111, .timing = 0b000001};
+	decode_lines_second_half[47] = (struct DecodeLine) { .rom_op = op_T0_cpx, .opcode_bits = 0b11100000, .opcode_mask = 0b11111111, .timing = 0b000001};
+	decode_lines_second_half[48] = (struct DecodeLine) { .rom_op = op_T2_php_pha, .opcode_bits = 0b00001000, .opcode_mask = 0b10111111, .timing = 0b000100};
+	decode_lines_second_half[49] = (struct DecodeLine) { .rom_op = op_T2_stack_pull, .opcode_bits = 0b00101000, .opcode_mask = 0b10111111, .timing = 0b000100};
+	decode_lines_second_half[50] = (struct DecodeLine) { .rom_op = op_T3_pla_pha, .opcode_bits = 0b00101000, .opcode_mask = 0b10111111, .timing = 0b001000};
+	decode_lines_second_half[51] = (struct DecodeLine) { .rom_op = op_T0_plp, .opcode_bits = 0b00101000, .opcode_mask = 0b11111111, .timing = 0b000001};
+	decode_lines_second_half[52] = (struct DecodeLine) { .rom_op = op_T0_pla, .opcode_bits = 0b01101000, .opcode_mask = 0b11111111, .timing = 0b000001};
+	decode_lines_second_half[53] = (struct DecodeLine) { .rom_op = op_T2_stack_pull, .opcode_bits = 0b01000000, .opcode_mask = 0b11011111, .timing = 0b000100};
+	decode_lines_second_half[54] = (struct DecodeLine) { .rom_op = op_T3_rti_rts, .opcode_bits = 0b01000000, .opcode_mask = 0b11011111, .timing = 0b001000};
+	decode_lines_second_half[55] = (struct DecodeLine) { .rom_op = op_T4_rti_rts, .opcode_bits = 0b01000000, .opcode_mask = 0b11011111, .timing = 0b010000};
+	decode_lines_second_half[56] = (struct DecodeLine) { .rom_op = op_T5_rts, .opcode_bits = 0b01100000, .opcode_mask = 0b11111111, .timing = 0b100000};
+	decode_lines_second_half[57] = (struct DecodeLine) { .rom_op = op_T0_rts, .opcode_bits = 0b01100000, .opcode_mask = 0b11111111, .timing = 0b000001};
+	decode_lines_second_half[58] = (struct DecodeLine) { .rom_op = op_T5_rti, .opcode_bits = 0b01000000, .opcode_mask = 0b11111111, .timing = 0b100000};
+	decode_lines_second_half[59] = (struct DecodeLine) { .rom_op = op_T0_rti, .opcode_bits = 0b01000000, .opcode_mask = 0b11111111, .timing = 0b000001};
+	decode_lines_second_half[60] = (struct DecodeLine) { .rom_op = op_T2_jsr, .opcode_bits = 0b00100000, .opcode_mask = 0b11111111, .timing = 0b000100};
+	decode_lines_second_half[61] = (struct DecodeLine) { .rom_op = op_T3_jsr, .opcode_bits = 0b00100000, .opcode_mask = 0b11111111, .timing = 0b001000};
+	decode_lines_second_half[62] = (struct DecodeLine) { .rom_op = op_T5_jsr_second_half, .opcode_bits = 0b00100000, .opcode_mask = 0b11111111, .timing = 0b100000};
+	decode_lines_second_half[63] = (struct DecodeLine) { .rom_op = op_T0_jsr, .opcode_bits = 0b00100000, .opcode_mask = 0b11111111, .timing = 0b000001};
+	decode_lines_second_half[64] = (struct DecodeLine) { .rom_op = op_T0_txa, .opcode_bits = 0b10001010, .opcode_mask = 0b11111111, .timing = 0b000001};
+	decode_lines_second_half[65] = (struct DecodeLine) { .rom_op = op_T0_tax, .opcode_bits = 0b10101010, .opcode_mask = 0b11111111, .timing = 0b000001};
+	decode_lines_second_half[66] = (struct DecodeLine) { .rom_op = op_T0_dex, .opcode_bits = 0b11001010, .opcode_mask = 0b11111111, .timing = 0b000001};
+	decode_lines_second_half[67] = (struct DecodeLine) { .rom_op = op_T0_inx, .opcode_bits = 0b11101000, .opcode_mask = 0b11111111, .timing = 0b000001};
+	decode_lines_second_half[68] = (struct DecodeLine) { .rom_op = op_T0_txs, .opcode_bits = 0b10011010, .opcode_mask = 0b11111111, .timing = 0b000001};
+	decode_lines_second_half[69] = (struct DecodeLine) { .rom_op = op_T0_tsx, .opcode_bits = 0b10111010, .opcode_mask = 0b11111111, .timing = 0b000001};
+	decode_lines_second_half[70] = (struct DecodeLine) { .rom_op = op_T0_tya, .opcode_bits = 0b10011000, .opcode_mask = 0b11111111, .timing = 0b000001};
+	decode_lines_second_half[71] = (struct DecodeLine) { .rom_op = op_T0_tay, .opcode_bits = 0b10101000, .opcode_mask = 0b11111111, .timing = 0b000001};
+	decode_lines_second_half[72] = (struct DecodeLine) { .rom_op = op_T0_iny, .opcode_bits = 0b11001000, .opcode_mask = 0b11111111, .timing = 0b000001};
+	decode_lines_second_half[73] = (struct DecodeLine) { .rom_op = op_T0_dey, .opcode_bits = 0b10001000, .opcode_mask = 0b11111111, .timing = 0b000001};
 	
 	reset_cpu();
 }
