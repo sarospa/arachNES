@@ -4,6 +4,13 @@
 #include "emu_nes.h"
 #include "controller.h"
 
+const unsigned char CONTROLLER_NONE = 0;
+const unsigned char CONTROLLER_STANDARD = 1;
+const unsigned char CONTROLLER_ZAPPER = 2;
+
+unsigned char player_one_type = 0xFF;
+unsigned char player_two_type = 0xFF;
+
 unsigned char* player_one_input;
 unsigned char* player_two_input;
 unsigned char* commands;
@@ -36,11 +43,31 @@ int main(int argc, char *argv[])
 	{
 		len = strlen(line);
 		fgetc(movie);
-		if ((!strncmp(line, "|", 1)) && (len >= 22))
+		if (!strncmp(line, "|", 1))
 		{
 			frames++;
 		}
+		else if ((!strncmp(line, "port0", 5)) && (len >= 7))
+		{
+			player_one_type = line[6] - '0';
+		}
+		else if ((!strncmp(line, "port1", 5)) && (len >= 7))
+		{
+			player_two_type = line[6] - '0';
+		}
 		len = 0;
+	}
+	
+	if ((player_one_type > CONTROLLER_ZAPPER) || (player_two_type > CONTROLLER_ZAPPER))
+	{
+		printf("Bad movie: Player controller types not set to valid values.\n");
+		return 4;
+	}
+	
+	if ((player_one_type == CONTROLLER_ZAPPER) || (player_two_type == CONTROLLER_ZAPPER))
+	{
+		printf("Error: Zapper not currently supported.\n");
+		return 5;
 	}
 	
 	player_one_input = malloc(sizeof(char) * frames);
@@ -61,19 +88,32 @@ int main(int argc, char *argv[])
 	{
 		len = strlen(line);
 		fgetc(movie);
-		if ((!strncmp(line, "|", 1)) && (len >= 22))
+		if ((!strncmp(line, "|", 1)))
 		{
-			commands[current_frame] = line[1] - '0';
-			for (unsigned int i = 0; i < 8; i++)
+			unsigned char line_char = 1;
+			commands[current_frame] = line[line_char] - '0';
+			line_char += 2;
+			if (player_one_type == CONTROLLER_STANDARD)
 			{
-				if (line[3 + i] != '.')
+				for (int i = 0; i < 8; i++)
 				{
-					player_one_input[current_frame] = player_one_input[current_frame] | (0b1 << (7 - i));
+					if (line[line_char] != '.')
+					{
+						player_one_input[current_frame] = player_one_input[current_frame] | (0b1 << (7 - i));
+					}
+					line_char++;
 				}
-				
-				if (line[12 + i] != '.')
+			}
+			line_char++;
+			if (player_two_type == CONTROLLER_STANDARD)
+			{
+				for (int i = 0; i < 8; i++)
 				{
-					player_two_input[current_frame] = player_two_input[current_frame] | (0b1 << (7 - i));
+					if (line[line_char] != '.')
+					{
+						player_two_input[current_frame] = player_two_input[current_frame] | (0b1 << (7 - i));
+					}
+					line_char++;
 				}
 			}
 			current_frame++;
