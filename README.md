@@ -1,7 +1,7 @@
 # arachNES
 "Average NES emulator contains 3 spiders" factoid actually just statistical error...
 
-If you're reading this somewhere other than github, you can find the source code at https://github.com/sarospa/arachNES
+If you're reading this somewhere other than github, you can find the source code at https://github.com/sarospa/arachNES<br />
 If you distribute a binary of arachNES to anyone else, please include the license and this readme. If either of them are missing (how would you be reading this if the readme is missing?) you can find them at the project github.
 
 An NES emulator written in C. Still very much a work in progress, and there's probably bits and pieces of personal notes that are not useful to anyone but myself.
