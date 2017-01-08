@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include "nrom00.h"
+#include "nrom_00.h"
 #include "../emu_nes.h"
 #include "../cartridge.h"
 #include "../nes_cpu.h"
@@ -93,7 +93,9 @@ void load_nothing(FILE* save_file __attribute__ ((unused)))
 	
 }
 
-void nrom00_init()
+// For mappers with no init. Since variables can be set to a default value on
+// declaration, quite a few mappers might end up using this.
+void no_init()
 {
-	// Nothing to do here.
+	
 }

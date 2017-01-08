@@ -5,8 +5,9 @@
 #include "cartridge.h"
 #include "nes_cpu.h"
 #include "nes_ppu.h"
-#include "mappers/nrom00.h"
-#include "mappers/unrom02.h"
+#include "mappers/nrom_00.h"
+#include "mappers/mmc1_01.h"
+#include "mappers/unrom_02.h"
 
 typedef void (*get_ptr_handler) (unsigned char*, unsigned int, unsigned char);
 typedef void (*mapper_init) (void);
@@ -131,14 +132,21 @@ void cartridge_init(unsigned char rom_mapper, unsigned char prg_pages, unsigned 
 	mapper_save_state_table = calloc(256, sizeof(save_file_handler*));
 	mapper_load_state_table = calloc(256, sizeof(save_file_handler*));
 	
-	init_table[0x00] = nrom00_init;
+	init_table[0x00] = no_init;
 	mapper_prg_table[0x00] = nrom00_get_pointer_at_prg_address;
 	mapper_chr_table[0x00] = fixed_get_pointer_at_chr_address;
 	mapper_nametable_table[0x00] = fixed_get_pointer_at_nametable_address;
 	mapper_save_state_table[0x00] = save_nothing;
 	mapper_load_state_table[0x00] = load_nothing;
 	
-	init_table[0x02] = unrom02_init;
+	init_table[0x01] = no_init;
+	mapper_prg_table[0x01] = mmc1_access_prg_memory;
+	mapper_chr_table[0x01] = mmc1_access_chr_memory;
+	mapper_nametable_table[0x01] = mmc1_access_nametable_memory;
+	mapper_save_state_table[0x01] = mmc1_save_state;
+	mapper_load_state_table[0x01] = mmc1_load_state;
+
+	init_table[0x02] = no_init;
 	mapper_prg_table[0x02] = unrom02_get_pointer_at_prg_address;
 	mapper_chr_table[0x02] = fixed_get_pointer_at_chr_address;
 	mapper_nametable_table[0x02] = fixed_get_pointer_at_nametable_address;

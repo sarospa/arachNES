@@ -1,14 +1,14 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include "unrom02.h"
+#include "unrom_02.h"
 #include "../emu_nes.h"
 #include "../cartridge.h"
 #include "../nes_cpu.h"
 #include "../nes_ppu.h"
 
 const unsigned int BANK_SIZE = 0x4000;
-unsigned char bank_select;
+unsigned char bank_select = 0;
 
 void unrom02_get_pointer_at_prg_address(unsigned char* data, unsigned int address, unsigned char access_type)
 {
@@ -48,9 +48,4 @@ void unrom02_save_state(FILE* save_file)
 void unrom02_load_state(FILE* save_file)
 {
 	fread(&bank_select, sizeof(char), 1, save_file);
-}
-
-void unrom02_init()
-{
-	bank_select = 0;
 }
