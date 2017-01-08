@@ -3,6 +3,7 @@
 #include<stdlib.h>
 #include "nes_ppu.h"
 #include "nes_cpu.h"
+#include "emu_nes.h"
 #include "cartridge.h"
 
 unsigned char* ppu_ram;
@@ -184,11 +185,11 @@ void access_ppu_register(unsigned char* data, unsigned int ppu_register, unsigne
 					// Check VRAM address increment flag
 					if ((ppu_control & 0b00000100) == 0b00000100)
 					{
-						vram_address += 32;
+						vram_address = (vram_address + 32) & 0x3FFF;
 					}
 					else
 					{
-						vram_address++;
+						vram_address = (vram_address + 1) & 0x3FFF;
 					}
 				}
 				else
@@ -289,11 +290,11 @@ void access_ppu_register(unsigned char* data, unsigned int ppu_register, unsigne
 				// Check VRAM address increment flag
 				if ((ppu_control & 0b00000100) == 0b00000100)
 				{
-					vram_address += 32;
+					vram_address = (vram_address + 32) & 0x3FFF;
 				}
 				else
 				{
-					vram_address++;
+					vram_address = (vram_address + 1) & 0x3FFF;
 				}
 				break;
 			}
@@ -668,7 +669,9 @@ unsigned char ppu_tick()
 						}
 					}
 				}
-				
+				// Only the lower six pixels contain color data. Garbage data should be truncated
+				// to six bits, so it can't be erroneously read as a 255 'no render' pixel.
+				pixel_data = (pixel_data & 0b111111);
 			}
 			else if (scan_pixel == 257)
 			{
