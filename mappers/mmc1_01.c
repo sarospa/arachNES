@@ -173,7 +173,6 @@ void mmc1_access_chr_memory(unsigned char* data, unsigned int address, unsigned 
 	}
 	else // access_type == WRITE
 	{
-		printf("%04X %04X\n", address, bank_address | (bank_select << 12));
 		if (use_chr_ram)
 		{
 			chr_ram[bank_address | (bank_select << 12)] = *data;

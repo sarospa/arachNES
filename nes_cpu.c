@@ -11,8 +11,8 @@
 unsigned const char WRITE = 1;
 unsigned const char READ = 0;
 unsigned const int RAM_SIZE = 2048;
-unsigned const int FIRST_HALF_DECODE_LINES = 21;
-unsigned const int SECOND_HALF_DECODE_LINES = 74;
+unsigned const int FIRST_HALF_DECODE_LINES = 24;
+unsigned const int SECOND_HALF_DECODE_LINES = 79;
 
 // Struct for holding data on a decode ROM line.
 // Each line has an opcode condition for turning on, in which each bit
@@ -1147,6 +1147,50 @@ void op_T0_iny()
 	test_zero_flag(y_register);
 }
 
+void op_brk_stack()
+{
+	address_low_bus = stack_pointer;
+	address_high_bus = 0x01;
+	stack_pointer--;
+	read_write = 0;
+}
+
+void op_T3_brk()
+{
+	data_bus = ((program_counter + 1) >> 8) & 0xFF;
+}
+
+void op_T4_brk()
+{
+	data_bus = (program_counter + 1) & 0xFF;
+}
+
+void op_T5_brk()
+{
+	data_bus = (status_flags | 0b00110000);
+	address_low_bus = 0xFE;
+	address_high_bus = 0xFF;
+	read_write = 1;
+}
+
+void op_brk()
+{
+	if (timing_cycle == 0)
+	{
+		address_low_bus = 0xFF;
+		address_high_bus = 0xFF;
+		alu_in_b = data_bus;
+		next_timing_cycle = 0b000001;
+	}
+}
+
+void op_T0_brk()
+{
+	address_low_bus = alu_in_b;
+	address_high_bus = data_bus;
+	program_counter = address_low_bus | (address_high_bus << 8);
+}
+
 // Two-cycle instructions have an odd behavior where T0 and T2 run at the
 // same time. The CPU has a special check for this that covers all two-cycle
 // instructions, which is reproduced here.
@@ -1364,6 +1408,9 @@ void cpu_init()
 	decode_lines_first_half[18] = (struct DecodeLine) { .rom_op = op_T0_php, .opcode_bits = 0b00001000, .opcode_mask = 0b11111111, .timing = 0b000001};
 	decode_lines_first_half[19] = (struct DecodeLine) { .rom_op = op_T4_jsr, .opcode_bits = 0b00100000, .opcode_mask = 0b11111111, .timing = 0b010000};
 	decode_lines_first_half[20] = (struct DecodeLine) { .rom_op = op_T5_jsr_first_half, .opcode_bits = 0b00100000, .opcode_mask = 0b11111111, .timing = 0b100000};
+	decode_lines_first_half[21] = (struct DecodeLine) { .rom_op = op_T3_brk, .opcode_bits = 0b00000000, .opcode_mask = 0b11111111, .timing = 0b001000};
+	decode_lines_first_half[22] = (struct DecodeLine) { .rom_op = op_T4_brk, .opcode_bits = 0b00000000, .opcode_mask = 0b11111111, .timing = 0b010000};
+	decode_lines_first_half[23] = (struct DecodeLine) { .rom_op = op_T5_brk, .opcode_bits = 0b00000000, .opcode_mask = 0b11111111, .timing = 0b100000};
 	
 	decode_lines_second_half[0] = (struct DecodeLine) { .rom_op = op_T2_jmp_abs, .opcode_bits = 0b01001100, .opcode_mask = 0b11111111, .timing = 0b000100};
 	decode_lines_second_half[1] = (struct DecodeLine) { .rom_op = op_T0, .opcode_bits = 0b00000000, .opcode_mask = 0b00000000, .timing = 0b000001};
@@ -1439,6 +1486,11 @@ void cpu_init()
 	decode_lines_second_half[71] = (struct DecodeLine) { .rom_op = op_T0_tay, .opcode_bits = 0b10101000, .opcode_mask = 0b11111111, .timing = 0b000001};
 	decode_lines_second_half[72] = (struct DecodeLine) { .rom_op = op_T0_iny, .opcode_bits = 0b11001000, .opcode_mask = 0b11111111, .timing = 0b000001};
 	decode_lines_second_half[73] = (struct DecodeLine) { .rom_op = op_T0_dey, .opcode_bits = 0b10001000, .opcode_mask = 0b11111111, .timing = 0b000001};
+	decode_lines_second_half[74] = (struct DecodeLine) { .rom_op = op_brk_stack, .opcode_bits = 0b00000000, .opcode_mask = 0b11111111, .timing = 0b000100};
+	decode_lines_second_half[75] = (struct DecodeLine) { .rom_op = op_brk_stack, .opcode_bits = 0b00000000, .opcode_mask = 0b11111111, .timing = 0b001000};
+	decode_lines_second_half[76] = (struct DecodeLine) { .rom_op = op_brk_stack, .opcode_bits = 0b00000000, .opcode_mask = 0b11111111, .timing = 0b010000};
+	decode_lines_second_half[77] = (struct DecodeLine) { .rom_op = op_brk, .opcode_bits = 0b00000000, .opcode_mask = 0b11111111, .timing = 0b000000};
+	decode_lines_second_half[78] = (struct DecodeLine) { .rom_op = op_T0_brk, .opcode_bits = 0b00000000, .opcode_mask = 0b11111111, .timing = 0b000001};
 	
 	reset_cpu();
 }
