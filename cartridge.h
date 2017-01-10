@@ -14,6 +14,7 @@ extern unsigned char* chr_ram;
 extern unsigned int prg_rom_pages;
 extern unsigned int chr_rom_pages;
 extern unsigned int prg_rom_size;
+extern unsigned int prg_ram_size;
 extern unsigned int chr_rom_size;
 extern unsigned char use_chr_ram;
 extern unsigned char nametable_mirroring;

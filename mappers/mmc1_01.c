@@ -14,6 +14,13 @@ unsigned char chr_bank_0_register = 0;
 unsigned char chr_bank_1_register = 0;
 unsigned char prg_bank_register = 0;
 
+// MMC1 is a mapper that appears on multiple boards, known as the SxROM family.
+// Some of them use MMC1's registers in special ways, so we need to determine
+// whether these special boards are being used, which can be inferred from
+// the configuration of PRG ROM and CHR ROM.
+unsigned char large_prg_banks = 0;
+unsigned char extra_prg_ram = 0;
+
 void mmc1_access_prg_memory(unsigned char* data, unsigned int address, unsigned char access_type)
 {
 	if (access_type == READ)
@@ -32,23 +39,33 @@ void mmc1_access_prg_memory(unsigned char* data, unsigned int address, unsigned 
 			// The address within the selected bank.
 			unsigned int bank_address = address & 0x3FFF;
 			unsigned char bank_select = 0;
+			unsigned char outer_bank_select = 0;
+			unsigned char rom_pages = prg_rom_pages;
+			// If we're using large PRG banks, then bit 4 of the CHR 0 bank register
+			// switches two 256 KB outer PRG banks. Any 'fixed' banks should operate
+			// within the outer bank.
+			if (large_prg_banks)
+			{
+				outer_bank_select = (chr_bank_0_register >> 4) & 0b1;
+				rom_pages = prg_rom_pages / 2;
+			}
 			switch (prg_control)
 			{
 				case 0b00:
 				case 0b01:
 				{
-					bank_select = (prg_bank_register & 0b1110) + cpu_bank;
+					bank_select = (prg_bank_register & 0b1110) + cpu_bank + (outer_bank_select * rom_pages);
 					break;
 				}
 				case 0b10:
 				{
 					if (cpu_bank == 0)
 					{
-						bank_select = 0;
+						bank_select = outer_bank_select * rom_pages;
 					}
 					else
 					{
-						bank_select = (prg_bank_register & 0b1111);
+						bank_select = (prg_bank_register & 0b1111) + (outer_bank_select * rom_pages);
 					}
 					break;
 				}
@@ -56,11 +73,11 @@ void mmc1_access_prg_memory(unsigned char* data, unsigned int address, unsigned 
 				{
 					if (cpu_bank == 1)
 					{
-						bank_select = prg_rom_pages - 1;
+						bank_select = (rom_pages - 1) + (outer_bank_select * rom_pages);
 					}
 					else
 					{
-						bank_select = (prg_bank_register & 0b1111);
+						bank_select = (prg_bank_register & 0b1111) + (outer_bank_select * rom_pages);
 					}
 					break;
 				}
@@ -243,4 +260,37 @@ void mmc1_load_state(FILE* save_file)
 	fread(&chr_bank_0_register, sizeof(char), 1, save_file);
 	fread(&chr_bank_1_register, sizeof(char), 1, save_file);
 	fread(&prg_bank_register, sizeof(char), 1, save_file);
+}
+
+void mmc1_init()
+{
+	// 512 KB ROM is 'large'. This should be 32 pages 16 KB big.
+	if (prg_rom_pages == 32)
+	{
+		large_prg_banks = 1;
+	}
+	
+	// If there's only 8 KB of CHR ROM/RAM, then there's room for the higher
+	// bits of the CHR bank select to be used for switching PRG RAM. This
+	// may add extra RAM for some boards that don't need it, but it probably
+	// won't have any particular effect.
+	if (chr_rom_pages <= 1)
+	{
+		extra_prg_ram = 1;
+		prg_ram = malloc(sizeof(char) * 0x8000 * 4);
+		for (unsigned int i = 0; i < 0x8000 * 4; i++)
+		{
+			prg_ram[i] = 0;
+		}
+		prg_ram_size = 0x8000;
+	}
+	else
+	{
+		prg_ram = malloc(sizeof(char) * 0x2000);
+		for (unsigned int i = 0; i < 0x2000; i++)
+		{
+			prg_ram[i] = 0;
+		}
+		prg_ram_size = 0x2000;
+	}
 }

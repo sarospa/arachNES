@@ -27,6 +27,7 @@ unsigned char* chr_ram;
 unsigned int prg_rom_pages;
 unsigned int chr_rom_pages;
 unsigned int prg_rom_size;
+unsigned int prg_ram_size;
 unsigned int chr_rom_size;
 unsigned char use_chr_ram;
 unsigned char nametable_mirroring;
@@ -95,12 +96,6 @@ void cartridge_init(unsigned char rom_mapper, unsigned char prg_pages, unsigned 
 	prg_rom = malloc(sizeof(char) * prg_rom_size);
 	fread(prg_rom, 1, prg_rom_size, rom);
 	
-	prg_ram = malloc(sizeof(char) * CART_RAM_SIZE);
-	for (unsigned int i = 0; i < CART_RAM_SIZE; i++)
-	{
-		prg_ram[i] = 0;
-	}
-	
 	chr_rom_pages = chr_pages;
 	chr_rom_size = chr_pages * CHR_ROM_PAGE;
 	chr_ram = malloc(sizeof(char) * CART_RAM_SIZE);
@@ -132,21 +127,24 @@ void cartridge_init(unsigned char rom_mapper, unsigned char prg_pages, unsigned 
 	mapper_save_state_table = calloc(256, sizeof(save_file_handler*));
 	mapper_load_state_table = calloc(256, sizeof(save_file_handler*));
 	
-	init_table[0x00] = no_init;
+	// NROM
+	init_table[0x00] = fixed_init;
 	mapper_prg_table[0x00] = nrom00_get_pointer_at_prg_address;
 	mapper_chr_table[0x00] = fixed_get_pointer_at_chr_address;
 	mapper_nametable_table[0x00] = fixed_get_pointer_at_nametable_address;
 	mapper_save_state_table[0x00] = save_nothing;
 	mapper_load_state_table[0x00] = load_nothing;
 	
-	init_table[0x01] = no_init;
+	// MMC1
+	init_table[0x01] = mmc1_init;
 	mapper_prg_table[0x01] = mmc1_access_prg_memory;
 	mapper_chr_table[0x01] = mmc1_access_chr_memory;
 	mapper_nametable_table[0x01] = mmc1_access_nametable_memory;
 	mapper_save_state_table[0x01] = mmc1_save_state;
 	mapper_load_state_table[0x01] = mmc1_load_state;
 
-	init_table[0x02] = no_init;
+	// UNROM
+	init_table[0x02] = fixed_init;
 	mapper_prg_table[0x02] = unrom02_get_pointer_at_prg_address;
 	mapper_chr_table[0x02] = fixed_get_pointer_at_chr_address;
 	mapper_nametable_table[0x02] = fixed_get_pointer_at_nametable_address;

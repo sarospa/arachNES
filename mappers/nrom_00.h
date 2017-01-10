@@ -6,6 +6,6 @@ void fixed_get_pointer_at_chr_address(unsigned char* data, unsigned int address,
 void fixed_get_pointer_at_nametable_address(unsigned char* data, unsigned int address, unsigned char access_type);
 void save_nothing(FILE* save_file);
 void load_nothing(FILE* save_file);
-void no_init();
+void fixed_init();
 
 #endif

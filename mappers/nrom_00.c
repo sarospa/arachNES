@@ -93,9 +93,13 @@ void load_nothing(FILE* save_file __attribute__ ((unused)))
 	
 }
 
-// For mappers with no init. Since variables can be set to a default value on
-// declaration, quite a few mappers might end up using this.
-void no_init()
+// For mappers with the default init.
+void fixed_init()
 {
-	
+	prg_ram = malloc(sizeof(char) * 0x2000);
+	for (unsigned int i = 0; i < 0x2000; i++)
+	{
+		prg_ram[i] = 0;
+	}
+	prg_ram_size = 0x2000;
 }
