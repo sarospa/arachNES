@@ -8,6 +8,7 @@
 #include "mappers/nrom_00.h"
 #include "mappers/mmc1_01.h"
 #include "mappers/unrom_02.h"
+#include "mappers/mmc3_04.h"
 
 typedef void (*get_ptr_handler) (unsigned char*, unsigned int, unsigned char);
 typedef void (*mapper_init) (void);
@@ -16,7 +17,7 @@ typedef void (*save_file_handler) (FILE*);
 const int PRG_ROM_PAGE = 1024 * 16;
 const int CHR_ROM_PAGE = 1024 * 8;
 const unsigned char HORIZONTAL = 0;
-const unsigned char VERTICAL = 0;
+const unsigned char VERTICAL = 1;
 const unsigned int CART_RAM_SIZE = 0x2000;
 
 unsigned char* prg_rom;
@@ -150,6 +151,14 @@ void cartridge_init(unsigned char rom_mapper, unsigned char prg_pages, unsigned 
 	mapper_nametable_table[0x02] = fixed_get_pointer_at_nametable_address;
 	mapper_save_state_table[0x02] = unrom02_save_state;
 	mapper_load_state_table[0x02] = unrom02_load_state;
+	
+	// MMC3
+	init_table[0x04] = mmc3_init;
+	mapper_prg_table[0x04] = mmc3_access_prg_memory;
+	mapper_chr_table[0x04] = mmc3_access_chr_memory;
+	mapper_nametable_table[0x04] = mmc3_access_nametable_memory;
+	mapper_save_state_table[0x04] = mmc3_save_state;
+	mapper_load_state_table[0x04] = mmc3_load_state;
 	
 	init_table[mapper]();
 }

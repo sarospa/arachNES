@@ -9,7 +9,9 @@ extern unsigned char* oam;
 
 extern unsigned char ppu_bus;
 
-extern unsigned char pending_nmi;
+extern unsigned char pending_interrupt;
+extern unsigned int scanline;
+extern unsigned int scan_pixel;
 
 void exit_emulator();
 

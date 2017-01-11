@@ -56,7 +56,6 @@ unsigned char* sprite_x_positions;
 unsigned char sprite_count;
 unsigned char sprite_0_selected;
 
-unsigned char pending_nmi;
 // Treated as two-bit shift registers to detect edges.
 unsigned char nmi_occurred;
 unsigned char nmi_output;
@@ -72,6 +71,8 @@ unsigned char reverse_byte(unsigned char byte)
 
 void get_pointer_at_ppu_address(unsigned char* data, unsigned int address, unsigned char access_type)
 {
+	address = address & 0x3FFF;
+	
 	if (address <= 0x1FFF)
 	{
 		get_pointer_at_chr_address(data, address, access_type);
@@ -278,7 +279,7 @@ void access_ppu_register(unsigned char* data, unsigned int ppu_register, unsigne
 				else
 				{
 					// Write the ppu bus data to the high byte.
-					vram_temp = (vram_temp & 0x00FF) | (ppu_bus * 0x100);
+					vram_temp = (vram_temp & 0x00FF) | ((ppu_bus & 0x3F) << 8);
 					write_toggle = 1;
 				}
 				break;
@@ -423,7 +424,7 @@ void load_sprites()
 	
 	for (int i = 0; i < 0x8; i++)
 	{
-		unsigned char fine_y = scanline - (secondary_oam[i * 4] + 1);
+		unsigned char fine_y = (scanline + 1) - (secondary_oam[i * 4] + 1);
 		unsigned char sprite_attribute_byte = secondary_oam[(i * 4) + 2];
 		unsigned char tile_number = secondary_oam[(i * 4) + 1];
 		unsigned char flip_vertical = (sprite_attribute_byte & 0b10000000) == 0b10000000;
@@ -490,7 +491,7 @@ void ppu_save_state(FILE* save_file)
 	fwrite(&palette_latch, sizeof(char), 1, save_file);
 	fwrite(&sprite_count, sizeof(char), 1, save_file);
 	fwrite(&sprite_0_selected, sizeof(char), 1, save_file);
-	fwrite(&pending_nmi, sizeof(char), 1, save_file);
+	fwrite(&pending_interrupt, sizeof(char), 1, save_file);
 	fwrite(&nmi_occurred, sizeof(char), 1, save_file);
 	fwrite(&nmi_output, sizeof(char), 1, save_file);
 	fwrite(&status_read, sizeof(char), 1, save_file);
@@ -528,7 +529,7 @@ void ppu_load_state(FILE* save_file)
 	fread(&palette_latch, sizeof(char), 1, save_file);
 	fread(&sprite_count, sizeof(char), 1, save_file);
 	fread(&sprite_0_selected, sizeof(char), 1, save_file);
-	fread(&pending_nmi, sizeof(char), 1, save_file);
+	fread(&pending_interrupt, sizeof(char), 1, save_file);
 	fread(&nmi_occurred, sizeof(char), 1, save_file);
 	fread(&nmi_output, sizeof(char), 1, save_file);
 	fread(&status_read, sizeof(char), 1, save_file);
@@ -587,21 +588,22 @@ unsigned char ppu_tick()
 		{
 			if ((scan_pixel > 0) && (scan_pixel <= 256))
 			{
-				pixel_data = 0x0F;
+				get_pointer_at_ppu_address(&pixel_data, 0x3F00, READ);
 			}
 		}
 		else
 		{
-			// Load sprites into buffers here.
-			if (scan_pixel == 0)
-			{
-				load_sprites();
-			}
 			// Rendering cycles
-			else if ((scan_pixel > 0) && (scan_pixel <= 256))
+			if ((scan_pixel > 0) && (scan_pixel <= 256))
 			{
-				// Default to black if nothing else gets rendered
-				pixel_data = 0x0F;
+				unsigned char show_left_sprites = 1;
+				if (scan_pixel <= 8)
+				{
+					background_enable = background_enable & ((ppu_mask >> 1) & 0b1);
+					show_left_sprites = (ppu_mask >> 2) & 0b1;
+				}
+				// Default to backdrop color if nothing else gets rendered
+				get_pointer_at_ppu_address(&pixel_data, 0x3F00, READ);
 				// Load the next tile every 8 cycles.
 				if (((scan_pixel % 8) == 1) && (scan_pixel > 1))
 				{
@@ -645,8 +647,8 @@ unsigned char ppu_tick()
 						{
 							unsigned char sprite_priority = (sprite_attributes[i] >> 5) & 0b1;
 							unsigned char sprite_palette = ((sprite_bitmaps_low[i] >> 7) & 0b1) | ((sprite_bitmaps_high[i] >> 6) & 0b10);
-							// Only load in sprite pixel if it's non-transparent.
-							if (sprite_palette > 0)
+							// Only load in sprite pixel if it's non-transparent and it isn't being masked in the leftmost column.
+							if ((sprite_palette > 0) && show_left_sprites)
 							{
 								// Check for sprite 0 hit
 								if (background_enable && (background_bitmap_palette > 0) && (i == 0) && sprite_0_selected)
@@ -679,6 +681,10 @@ unsigned char ppu_tick()
 				increment_vram_vert();
 				// Evaluating sprites here for now, in preparation for the next scanline.
 				evaluate_sprites();
+			}
+			else if (scan_pixel == 260)
+			{
+				load_sprites();
 			}
 			else if (scan_pixel == 321)
 			{
@@ -741,7 +747,8 @@ unsigned char ppu_tick()
 	
 	if (((nmi_occurred & 0b1) == 1) && ((nmi_output & 0b1) == 1) && ((nmi_occurred == 0b01) || (nmi_output == 0b01)))
 	{
-		pending_nmi = 1;
+		pending_interrupt++;
+		interrupt_type = NMI;
 	}
 	
 	// Shift the NMI bits into the 'previous frame' bits.

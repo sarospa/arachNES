@@ -8,6 +8,8 @@ extern const int DEBUG_LIMIT;
 
 extern const unsigned int KB;
 extern const unsigned int STACK_PAGE;
+extern unsigned const char NMI;
+extern unsigned const char IRQ;
 
 extern unsigned const char WRITE;
 extern unsigned const char READ;
@@ -34,7 +36,8 @@ extern unsigned char apu_status;
 extern unsigned char controller_1_port;
 extern unsigned char controller_2_port;
 
-extern unsigned char pending_nmi;
+extern unsigned char pending_interrupt;
+extern unsigned char interrupt_type;
 
 extern unsigned char* cpu_ram;
 extern unsigned char* prg_rom;

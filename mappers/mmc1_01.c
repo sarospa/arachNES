@@ -34,7 +34,7 @@ void mmc1_access_prg_memory(unsigned char* data, unsigned int address, unsigned 
 		else
 		{
 			unsigned char prg_control = (control_register >> 2) & 0b11;
-			// Which of the two CPU banks the address is in (top or bottom);
+			// Which of the two CPU banks the address is in (top or bottom).
 			unsigned char cpu_bank = (address & 0x4000) >> 14;
 			// The address within the selected bank.
 			unsigned int bank_address = address & 0x3FFF;

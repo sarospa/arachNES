@@ -13,6 +13,8 @@ unsigned const char READ = 0;
 unsigned const int RAM_SIZE = 2048;
 unsigned const int FIRST_HALF_DECODE_LINES = 24;
 unsigned const int SECOND_HALF_DECODE_LINES = 79;
+unsigned const char NMI = 0;
+unsigned const char IRQ = 1;
 
 // Struct for holding data on a decode ROM line.
 // Each line has an opcode condition for turning on, in which each bit
@@ -55,6 +57,10 @@ unsigned char alu_in_b = 0;
 unsigned char alu_out = 0;
 // Controls the CPU's reads and writes to memory. 1 == read, 0 == write.
 unsigned char read_write = 1;
+
+unsigned char pending_interrupt = 0;
+unsigned char interrupt_cycle = 0;
+unsigned char interrupt_type = 0;
 
 // Represents lines for ops that do something in the first half of the cycle.
 struct DecodeLine* decode_lines_first_half;
@@ -1171,6 +1177,7 @@ void op_T5_brk()
 	address_low_bus = 0xFE;
 	address_high_bus = 0xFF;
 	read_write = 1;
+	status_flags = status_flags | 0b00000100;
 }
 
 void op_brk()
@@ -1276,6 +1283,20 @@ void execute_opcode()
 // behaving correctly on every cycle.
 void cpu_tick()
 {
+	// If an interrupt is pending, the CPU is set to react to it (IRQ enabled, or it's an NMI) and we aren't in the middle of
+	// an interrupt already, begin the interrupt process.
+	if (pending_interrupt && ((timing_cycle & 0b0000010) == 0b0000010) && ((interrupt_type == NMI) || ((status_flags &0b00000100) == 0)))
+	{
+		if (interrupt_cycle == 0)
+		{
+			interrupt_cycle = 1;
+			if (interrupt_type == NMI)
+			{
+				pending_interrupt--;
+			}
+		}
+	}
+	
 	if (oam_dma_active && ((timing_cycle & 0b0000100) == 0b0000100))
 	{
 		if (oam_dma_write)
@@ -1294,13 +1315,11 @@ void cpu_tick()
 		}
 		oam_dma_write = !oam_dma_write;
 	}
-	// Gonna use the pending NMI flag as a stand-in for cycle timing
-	// so as not to break anything else.
 	// A lot of this is covered by the existing ops, but I think for this,
 	// it would be easier to simply keep it self-contained.
-	else if (pending_nmi && ((timing_cycle & 0b0000010) == 0b0000010))
+	else if (interrupt_cycle > 0)
 	{
-		switch (pending_nmi)
+		switch (interrupt_cycle)
 		{
 			case 0b0000001:
 			{
@@ -1333,25 +1352,40 @@ void cpu_tick()
 			}
 			case 0b0010000:
 			{
-				address_low_bus = 0xFA;
+				if (interrupt_type == NMI)
+				{
+					address_low_bus = 0xFA;
+				}
+				else if (interrupt_type == IRQ)
+				{
+					address_low_bus = 0xFE;
+				}
 				address_high_bus = 0xFF;
+				status_flags = status_flags | 0b00000100;
 				break;
 			}
 			case 0b0100000:
 			{
 				access_cpu_memory(&alu_in_b, address_bus, READ);
-				address_low_bus = 0xFB;
+				if (interrupt_type == NMI)
+				{
+					address_low_bus = 0xFB;
+				}
+				else if (interrupt_type == IRQ)
+				{
+					address_low_bus = 0xFF;
+				}
 				break;
 			}
 			case 0b1000000:
-			{
+			{ 
 				access_cpu_memory(&data_bus, address_bus, READ);
 				program_counter = alu_in_b | (data_bus << 8);
 				break;
 			}
 		}
 		address_bus = address_low_bus | (address_high_bus << 8);
-		pending_nmi = (pending_nmi << 1) & 0b1111111;
+		interrupt_cycle = (interrupt_cycle << 1) & 0b1111111;
 	}
 	else
 	{
