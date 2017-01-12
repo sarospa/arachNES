@@ -14,7 +14,14 @@ I'm not including any ROMs here, for what I hope are fairly obvious reasons, but
 
 The emulator gets its palette from palettes\ntscpalette.pal. The palette will likely be subject to change, and you can use your own if you want. It was generated with http://bisqwit.iki.fi/utils/nespalette.php or you could modify it yourself - it's just 64 RGB triplets.
 
-If you'd like to submit an issue, please prepend the issue title with the name of the game that the issue was found in, or (in the case of test ROMs or other non-game ROMs) the name of the ROM itself. Currently, only NROM games are supported, and non-NROM games are not expected to boot. If a game does not boot at all and you wish to open an issue, please first open the ROM in a hex editor and check if byte $06 and byte $07 both have a 0 in their high hex digit. If yes, then it's NROM. If no, then it uses some other mapper, and knowing that it does not boot will not currently be helpful. As I add mapper support, I may give a list of supported mappers, but if you aren't sure, the emulator itself should report a warning that a ROM's mapper is unsupported, if you're logging the output to a file.
+If you'd like to submit an issue, please prepend the issue title with the name of the game that the issue was found in, or (in the case of test ROMs or other non-game ROMs) the name of the ROM itself. Currently, the following mappers are supported:
+
+00: NROM
+01: MMC1
+02: UNROM
+04: MMC3
+
+If you aren't sure what mapper a game has, the emulator itself should report a warning that a ROM's mapper is unsupported, if you're logging the output to a file. If not, it's fairly safe to assume that if the game doesn't boot, its mapper is not supported. If you wish to open an issue for a game not booting, please confirm that the ROM has a supported mapper first.
 
 Here's the controls! They aren't currently rebindable, but that functionality will come, eventually, probably.
 
