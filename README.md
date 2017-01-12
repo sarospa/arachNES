@@ -8,6 +8,8 @@ An NES emulator written in C. Still very much a work in progress, and there's pr
 
 Feel free to try building it if you want, just bear in mind that it requires SDL2 to work.
 
+arachNES has two binaries, arachnes.exe and arach_movie.exe. They run from the command line; 'arachnes.exe <rom>' runs the chosen ROM, and 'arach_movie.exe <rom> <movie>' runs the chosen ROM and plays the inputs from the chosen movie. There's no checking that the ROM and the movie actually match right now, so do be careful of that.
+
 I'm not including any ROMs here, for what I hope are fairly obvious reasons, but a number of test ROMs can be found at http://wiki.nesdev.com/w/index.php/Emulator_tests The one I'm working with right now is nestest.
 
 The emulator gets its palette from palettes\ntscpalette.pal. The palette will likely be subject to change, and you can use your own if you want. It was generated with http://bisqwit.iki.fi/utils/nespalette.php or you could modify it yourself - it's just 64 RGB triplets.
