@@ -265,7 +265,7 @@ void mmc3_access_nametable_memory(unsigned char* data, unsigned int address, uns
 void mmc3_save_state(FILE* save_file)
 {
 	fwrite(&bank_select_register, sizeof(char), 1, save_file);
-	fwrite(&bank_selects, sizeof(char), 8, save_file);
+	fwrite(bank_selects, sizeof(char), 8, save_file);
 	fwrite(&mirroring_register, sizeof(char), 1, save_file);
 	fwrite(&prg_ram_protect_register, sizeof(char), 1, save_file);
 	fwrite(&irq_latch_register, sizeof(char), 1, save_file);
@@ -279,7 +279,7 @@ void mmc3_save_state(FILE* save_file)
 void mmc3_load_state(FILE* save_file)
 {
 	fread(&bank_select_register, sizeof(char), 1, save_file);
-	fread(&bank_selects, sizeof(char), 8, save_file);
+	fread(bank_selects, sizeof(char), 8, save_file);
 	fread(&mirroring_register, sizeof(char), 1, save_file);
 	fread(&prg_ram_protect_register, sizeof(char), 1, save_file);
 	fread(&irq_latch_register, sizeof(char), 1, save_file);
