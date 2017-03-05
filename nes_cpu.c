@@ -405,6 +405,8 @@ void cpu_save_state(FILE* save_file)
 	fwrite(&alu_in_b, sizeof(char), 1, save_file);
 	fwrite(&alu_out, sizeof(char), 1, save_file);
 	fwrite(&read_write, sizeof(char), 1, save_file);
+	fwrite(&interrupt_cycle, sizeof(char), 1, save_file);
+	fwrite(&interrupt_type, sizeof(char), 1, save_file);
 	
 	fwrite(cpu_ram, sizeof(char), RAM_SIZE, save_file);
 }
@@ -434,6 +436,8 @@ void cpu_load_state(FILE* save_file)
 	fread(&alu_in_b, sizeof(char), 1, save_file);
 	fread(&alu_out, sizeof(char), 1, save_file);
 	fread(&read_write, sizeof(char), 1, save_file);
+	fread(&interrupt_cycle, sizeof(char), 1, save_file);
+	fread(&interrupt_type, sizeof(char), 1, save_file);
 	
 	fread(cpu_ram, sizeof(char), RAM_SIZE, save_file);
 }

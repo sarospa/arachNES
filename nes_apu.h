@@ -14,6 +14,7 @@ extern unsigned char pulse_1_silence;
 extern unsigned char pulse_2_silence;
 extern unsigned char triangle_silence;
 extern unsigned char noise_silence;
+extern unsigned char sample_silence;
 
 void apu_read(unsigned char* data, unsigned int address);
 void apu_write(unsigned char* data, unsigned int address);

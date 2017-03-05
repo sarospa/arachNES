@@ -38,6 +38,7 @@ unsigned char unbound_framerate;
 unsigned char frame_finished;
 
 unsigned char dummy;
+unsigned char full_log = 0;
 
 SDL_AudioSpec want;
 SDL_AudioDeviceID device;
@@ -72,6 +73,7 @@ const unsigned int STACK_PAGE = 0x100;
 
 SDL_GameController* pad;
 struct Color* palette;
+const unsigned int PALETTE_SIZE = 64;
 
 unsigned char pause_emulator = 0;
 
@@ -527,6 +529,10 @@ void handle_user_input()
 								noise_silence = !noise_silence;
 								break;
 							}
+							case SDL_SCANCODE_5:
+							{
+								sample_silence = !sample_silence;
+							}
 						}
 					}
 					break;
@@ -631,6 +637,26 @@ void handle_movie_input(unsigned char player_one_input, unsigned char command)
 								unbound_framerate = 0;
 								break;
 							}
+							case SDL_SCANCODE_F:
+							{
+								full_log = 1;
+								break;
+							}
+						}
+					}
+					break;
+				}
+				case SDL_KEYUP:
+				{
+					if (!event.key.repeat)
+					{
+						switch(event.key.keysym.scancode)
+						{
+							case SDL_SCANCODE_F:
+							{
+								full_log = 0;
+								break;
+							}
 						}
 					}
 				}
@@ -700,11 +726,11 @@ void nes_init(char* rom_name)
 	
 	fclose(rom);
 	
-	palette = malloc(sizeof(struct Color) * 64);
+	palette = malloc(sizeof(struct Color) * PALETTE_SIZE);
 	
 	FILE* paletteData = fopen("palettes/ntscpalette.pal", "rb");
 	fseek(paletteData, SEEK_SET, 0);
-	fread(palette, sizeof(struct Color), 64, paletteData);
+	fread(palette, sizeof(struct Color), PALETTE_SIZE, paletteData);
 	fclose(paletteData);
 	
 	current_frame = SDL_GetTicks();

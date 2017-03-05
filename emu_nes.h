@@ -8,6 +8,7 @@ extern unsigned char debug_log_sound;
 
 // Dummy register for stubbing unimplemented registers and capturing 'ignored' writes.
 extern unsigned char dummy;
+extern unsigned char full_log;
 
 void exit_emulator();
 void sdl_init();

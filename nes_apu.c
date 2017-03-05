@@ -10,6 +10,7 @@ unsigned int apu_half_clock_count;
 const unsigned int FOUR_STEP_FRAME_LENGTH = 29830;
 const unsigned int FIVE_STEP_FRAME_LENGTH = 37282;
 const unsigned char COARSE_MAX_VOLUME = 15;
+const unsigned char FINE_MAX_VOLUME = 127;
 
 unsigned char apu_status;
 unsigned char apu_frame_settings;
@@ -76,9 +77,22 @@ unsigned char noise_envelope_start;
 unsigned char noise_envelope_divider;
 unsigned char noise_envelope_decay;
 
+// Bit 7 is the IRQ enable flag. Bit 6 is the loop flag. Bits 0-3 is the rate index.
+unsigned char dmc_control = 0;
+unsigned char dmc_sample_address = 0;
+unsigned char dmc_sample_length = 0;
+unsigned char dmc_sample_buffer = 0;
+unsigned char dmc_bits_remaining = 0;
+unsigned int dmc_current_address = 0;
+unsigned int dmc_bytes_remaining = 0;
+unsigned int dmc_rate_count = 0;
+unsigned char dmc_output_level = 0;
+unsigned char dmc_silence_flag = 0;
+
 unsigned int* noise_period_table;
 
 unsigned char* length_table;
+unsigned int* dmc_rate_table;
 
 unsigned char* sequencer;
 unsigned char sequencer_index;
@@ -98,6 +112,7 @@ unsigned char pulse_1_silence;
 unsigned char pulse_2_silence;
 unsigned char triangle_silence;
 unsigned char noise_silence;
+unsigned char sample_silence;
 
 void apu_write(unsigned char* data, unsigned int address)
 {
@@ -185,23 +200,43 @@ void apu_write(unsigned char* data, unsigned int address)
 		}
 		case 0x4010:
 		{
+			dmc_control = *data;
+			dmc_rate_count = dmc_rate_table[dmc_control & 0b1111];
 			break;
 		}
 		case 0x4011:
 		{
+			dmc_output_level = *data;
 			break;
 		}
 		case 0x4012:
 		{
+			dmc_sample_address = *data;
 			break;
 		}
 		case 0x4013:
 		{
+			dmc_sample_length = *data;
 			break;
 		}
 		case 0x4015:
 		{
 			apu_status = *data;
+			// Set the DMC bytes remaining to 0 on disabling DMC,
+			// thus halting it.
+			if (((apu_status >> 4) & 0b1) == 0)
+			{
+				dmc_bytes_remaining = 0;
+			}
+			// If DMC bytes remaining is 0, then 
+			else if (dmc_bytes_remaining == 0)
+			{
+				// Sample address = %11AAAAAA.AA000000
+				dmc_current_address = 0xC000 | (dmc_sample_address << 6);
+				// Sample length = %LLLL.LLLL0001
+				dmc_bytes_remaining = (dmc_sample_length << 4) | 1;
+				dmc_bits_remaining = 0;
+			}
 			break;
 		}
 		case 0x4017:
@@ -391,6 +426,17 @@ void apu_save_state(FILE* save_file)
 	fwrite(&noise_envelope_divider, sizeof(char), 1, save_file);
 	fwrite(&noise_envelope_decay, sizeof(char), 1, save_file);
 	
+	fwrite(&dmc_control, sizeof(char), 1, save_file);
+	fwrite(&dmc_sample_address, sizeof(char), 1, save_file);
+	fwrite(&dmc_sample_length, sizeof(char), 1, save_file);
+	fwrite(&dmc_sample_buffer, sizeof(char), 1, save_file);
+	fwrite(&dmc_bits_remaining, sizeof(char), 1, save_file);
+	fwrite(&dmc_current_address, sizeof(int), 1, save_file);
+	fwrite(&dmc_bytes_remaining, sizeof(int), 1, save_file);
+	fwrite(&dmc_rate_count, sizeof(int), 1, save_file);
+	fwrite(&dmc_output_level, sizeof(char), 1, save_file);
+	fwrite(&dmc_silence_flag, sizeof(char), 1, save_file);
+	
 	fwrite(&sequencer_index, sizeof(char), 1, save_file);
 }
 
@@ -445,6 +491,17 @@ void apu_load_state(FILE* save_file)
 	fread(&noise_envelope_start, sizeof(char), 1, save_file);
 	fread(&noise_envelope_divider, sizeof(char), 1, save_file);
 	fread(&noise_envelope_decay, sizeof(char), 1, save_file);
+	
+	fread(&dmc_control, sizeof(char), 1, save_file);
+	fread(&dmc_sample_address, sizeof(char), 1, save_file);
+	fread(&dmc_sample_length, sizeof(char), 1, save_file);
+	fread(&dmc_sample_buffer, sizeof(char), 1, save_file);
+	fread(&dmc_bits_remaining, sizeof(char), 1, save_file);
+	fread(&dmc_current_address, sizeof(int), 1, save_file);
+	fread(&dmc_bytes_remaining, sizeof(int), 1, save_file);
+	fread(&dmc_rate_count, sizeof(int), 1, save_file);
+	fread(&dmc_output_level, sizeof(char), 1, save_file);
+	fread(&dmc_silence_flag, sizeof(char), 1, save_file);
 	
 	fread(&sequencer_index, sizeof(char), 1, save_file);
 	
@@ -754,9 +811,10 @@ void mix_audio()
 	float pulse_2_mix = ((0.00752 * pulse_2_volume) - (0.00752 * (pulse_2_high / 2.0))) * !pulse_2_silence;
 	float triangle_mix = ((0.00851  * sequencer[sequencer_index]) - (0.00851 * 7.5)) * !triangle_silence;
 	float noise_mix = ((0.00494 * noise_volume) - (0.00494 * noise_high / 2.0)) * !noise_silence;
+	float dmc_mix = ((0.00335 * dmc_output_level) - (0.00335 * FINE_MAX_VOLUME / 2.0)) * !sample_silence;
 	
 	float pulse_out = pulse_1_mix + pulse_2_mix;
-	float tnd_out = triangle_mix + noise_mix;
+	float tnd_out = triangle_mix + noise_mix + dmc_mix;
 	mixer_buffer[apu_buffer_length] = pulse_out + tnd_out + 0.5;
 	apu_buffer_length++;
 }
@@ -832,6 +890,68 @@ void apu_tick()
 			}
 		}
 		apu_half_clock_count = (apu_half_clock_count + 1) % FOUR_STEP_FRAME_LENGTH;
+	}
+	
+	unsigned char dmc_loop = (dmc_control >> 6) & 0b1;
+	if (dmc_rate_count == 0)
+	{
+		if (dmc_bits_remaining == 0)
+		{
+			if (dmc_bytes_remaining > 0)
+			{
+				dmc_silence_flag = 0;
+				dmc_current_address++;
+				if (dmc_current_address > 0xFFFF)
+				{
+					dmc_current_address = 0x8000;
+				}
+				// TODO: This is a bit quick and dirty. To be more cycle-accurate, should halt
+				// the CPU to allow it to do a read from memory. But it works for now.
+				access_cpu_memory(&dmc_sample_buffer, dmc_current_address, READ);
+				dmc_bytes_remaining--;
+				dmc_bits_remaining = 8;
+			}
+			else if (dmc_loop)
+			{
+				dmc_silence_flag = 0;
+				// Sample address = %11AAAAAA.AA000000
+				dmc_current_address = 0xC000 | (dmc_sample_address << 6);
+				// Sample length = %LLLL.LLLL0001
+				dmc_bytes_remaining = (dmc_sample_length << 4) | 1;
+				// TODO: This is a bit quick and dirty. To be more cycle-accurate, should halt
+				// the CPU to allow it to do a read from memory. But it works for now.
+				access_cpu_memory(&dmc_sample_buffer, dmc_current_address, READ);
+				dmc_bytes_remaining--;
+				dmc_bits_remaining = 8;
+			}
+			else
+			{
+				dmc_silence_flag = 1;
+			}
+		}
+		
+		if (!dmc_silence_flag)
+		{
+			// Each bit of a sample changes the level. A 1 adds 2 to the output level,
+			// and a 0 subtracts 2 from the output level.
+			// The output level is clamped between 0 and 127.
+			unsigned char output_bit = dmc_sample_buffer & 0b1;
+			if (output_bit && (dmc_output_level < 126))
+			{
+				dmc_output_level += 2;
+			}
+			else if (dmc_output_level > 1)
+			{
+				dmc_output_level -= 2;
+			}
+			dmc_bits_remaining--;
+			dmc_sample_buffer = dmc_sample_buffer >> 1;
+		}
+		dmc_rate_count = dmc_rate_table[dmc_control & 0b1111];
+	}
+	else
+	{
+		dmc_rate_count--;
 	}
 	
 	// Anything that should only occur on whole APU clocks goes here.
@@ -1004,10 +1124,29 @@ void apu_init()
 	length_table[30] = 32;
 	length_table[31] = 30;
 	
+	dmc_rate_table = malloc(sizeof(int) * 16);
+	dmc_rate_table[0] = 428;
+	dmc_rate_table[1] = 380;
+	dmc_rate_table[2] = 340;
+	dmc_rate_table[3] = 320;
+	dmc_rate_table[4] = 286;
+	dmc_rate_table[5] = 254;
+	dmc_rate_table[6] = 226;
+	dmc_rate_table[7] = 214;
+	dmc_rate_table[8] = 190;
+	dmc_rate_table[9] = 160;
+	dmc_rate_table[10] = 142;
+	dmc_rate_table[11] = 128;
+	dmc_rate_table[12] = 106;
+	dmc_rate_table[13] = 84;
+	dmc_rate_table[14] = 72;
+	dmc_rate_table[15] = 54;
+	
 	triangle_timer_count = 0;
 	
 	pulse_1_silence = 0;
 	pulse_2_silence = 0;
 	triangle_silence = 0;
 	noise_silence = 0;
+	sample_silence = 0;
 }
