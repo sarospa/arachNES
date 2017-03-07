@@ -31,7 +31,7 @@ void mmc1_access_prg_memory(unsigned char* data, unsigned int address, unsigned 
 			*data = prg_ram[address & 0x1FFF];
 		}
 		// PRG ROM
-		else
+		else if (address >= 0x8000)
 		{
 			unsigned char prg_control = (control_register >> 2) & 0b11;
 			// Which of the two CPU banks the address is in (top or bottom).
@@ -95,7 +95,7 @@ void mmc1_access_prg_memory(unsigned char* data, unsigned int address, unsigned 
 			prg_ram[address & 0x1FFF] = *data;
 		}
 		// PRG ROM
-		else
+		else if (address >= 0x8000)
 		{
 			unsigned char reset_bit = (*data >> 7) & 0b1;
 			unsigned char data_bit = *data & 0b1;

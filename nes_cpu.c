@@ -110,7 +110,7 @@ void access_cpu_memory(unsigned char* data, unsigned int address, unsigned char 
 		{
 			apu_read(data, address);
 		}
-		else if (address >= 0x6000 && address <= 0xFFFF)
+		else if (address >= 0x4020 && address <= 0xFFFF)
 		{
 			get_pointer_at_prg_address(data, address, access_type);
 		}
@@ -151,7 +151,7 @@ void access_cpu_memory(unsigned char* data, unsigned int address, unsigned char 
 		{
 			apu_write(data, address);
 		}
-		else if (address >= 0x6000 && address <= 0xFFFF)
+		else if (address >= 0x4020 && address <= 0xFFFF)
 		{
 			get_pointer_at_prg_address(data, address, access_type);
 		}
