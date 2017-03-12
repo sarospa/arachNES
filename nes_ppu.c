@@ -118,6 +118,46 @@ void get_pointer_at_attribute_table_address(unsigned char* data, int address, un
 	get_pointer_at_ppu_address(data, 0x23C0 | (address & 0b110000000000) | ((address >> 4) & 0b111000) | ((address >> 2) & 0b111), access_type);
 }
 
+// Increments the coarse X-scroll in VRAM.
+void increment_vram_horz()
+{
+	unsigned char tile_x = ((vram_address + 1) & 0b11111);
+	// Move to the next nametable when the scroll value wraps.
+	if (tile_x == 0)
+	{
+		vram_address = vram_address ^ 0b10000000000;
+	}
+	vram_address = (vram_address & 0b111111111100000) | tile_x;
+}
+
+// Overwrite VRAM's X-scroll bits with the ones from temp VRAM.
+void reset_vram_horz()
+{
+	vram_address = (vram_address & 0b111101111100000) | (vram_temp & 0b10000011111);
+}
+
+// Increments the fine Y-scroll in VRAM.
+void increment_vram_vert()
+{
+	unsigned int scroll_y = ((vram_address >> 12) + ((vram_address >> 2) & 0b11111000) + 1) & 0b11111111;
+	// Move down one nametable when we hit the bottom of the screen.
+	// Note that this is not the bottom of the nametable, row 31, but row 29. Thus, we should check
+	// if the row hits 30 when wrapping, and set it to the top of the next nametable.
+	// Wrapping inside 'out of bounds' rows DOES NOT move to the next nametable.
+	if (scroll_y == 0b11110000)
+	{
+		vram_address = vram_address ^ 0b100000000000;
+		scroll_y = 0;
+	}
+	vram_address = (vram_address & 0b110000011111) | ((scroll_y << 12) & 0b111000000000000) | ((scroll_y << 2) & 0b1111100000);
+}
+
+// Overwrite VRAM's Y-scroll bits with the ones from temp VRAM.
+void reset_vram_vert()
+{
+	vram_address = (vram_address & 0b10000011111) | (vram_temp & 0b111101111100000);
+}
+
 // Notifies the PPU that the CPU accessed the PPU bus.
 // If the PPU needs to write, it should do it here.
 // If the PPU needs to read, it should save the register address
@@ -183,14 +223,25 @@ void access_ppu_register(unsigned char* data, unsigned int ppu_register, unsigne
 					}
 					get_pointer_at_ppu_address(&ppu_data_buffer, vram_address, READ);
 					
-					// Check VRAM address increment flag
-					if ((ppu_control & 0b00000100) == 0b00000100)
+					// Increment the vram address.
+					unsigned char render_disable = (ppu_mask & 0b00011000) == 0;
+					if ((!render_disable) && ((scanline < 240) || (scanline == 261)))
 					{
-						vram_address = (vram_address + 32) & 0x3FFF;
+						// During rendering, the coarse X and fine Y are both incremented.
+						increment_vram_horz();
+						increment_vram_vert();
 					}
 					else
 					{
-						vram_address = (vram_address + 1) & 0x3FFF;
+						// Check VRAM address increment flag
+						if ((ppu_control & 0b00000100) == 0b00000100)
+						{
+							vram_address = (vram_address + 32) & 0x3FFF;
+						}
+						else
+						{
+							vram_address = (vram_address + 1) & 0x3FFF;
+						}
 					}
 				}
 				else
@@ -288,60 +339,32 @@ void access_ppu_register(unsigned char* data, unsigned int ppu_register, unsigne
 			case 0x2007:
 			{
 				get_pointer_at_ppu_address(&ppu_bus, vram_address, WRITE);
-				// Check VRAM address increment flag
-				if ((ppu_control & 0b00000100) == 0b00000100)
+				
+				// Increment the vram address.
+				unsigned char render_disable = (ppu_mask & 0b00011000) == 0;
+				if ((!render_disable) && ((scanline < 240) || (scanline == 261)))
 				{
-					vram_address = (vram_address + 32) & 0x3FFF;
+					// During rendering, the coarse X and fine Y are both incremented.
+					increment_vram_horz();
+					increment_vram_vert();
 				}
 				else
 				{
-					vram_address = (vram_address + 1) & 0x3FFF;
+					// Check VRAM address increment flag
+					if ((ppu_control & 0b00000100) == 0b00000100)
+					{
+						vram_address = (vram_address + 32) & 0x3FFF;
+					}
+					else
+					{
+						vram_address = (vram_address + 1) & 0x3FFF;
+					}
 				}
 				break;
 			}
 		}
 		register_accessed = 0;
 	}
-}
-
-// Increments the coarse X-scroll in VRAM.
-void increment_vram_horz()
-{
-	unsigned char tile_x = ((vram_address + 1) & 0b11111);
-	// Move to the next nametable when the scroll value wraps.
-	if (tile_x == 0)
-	{
-		vram_address = vram_address ^ 0b10000000000;
-	}
-	vram_address = (vram_address & 0b111111111100000) | tile_x;
-}
-
-// Overwrite VRAM's X-scroll bits with the ones from temp VRAM.
-void reset_vram_horz()
-{
-	vram_address = (vram_address & 0b111101111100000) | (vram_temp & 0b10000011111);
-}
-
-// Increments the fine Y-scroll in VRAM.
-void increment_vram_vert()
-{
-	unsigned int scroll_y = ((vram_address >> 12) + ((vram_address >> 2) & 0b11111000) + 1) & 0b11111111;
-	// Move down one nametable when we hit the bottom of the screen.
-	// Note that this is not the bottom of the nametable, row 31, but row 29. Thus, we should check
-	// if the row hits 30 when wrapping, and set it to the top of the next nametable.
-	// Wrapping inside 'out of bounds' rows DOES NOT move to the next nametable.
-	if (scroll_y == 0b11110000)
-	{
-		vram_address = vram_address ^ 0b100000000000;
-		scroll_y = 0;
-	}
-	vram_address = (vram_address & 0b110000011111) | ((scroll_y << 12) & 0b111000000000000) | ((scroll_y << 2) & 0b1111100000);
-}
-
-// Overwrite VRAM's Y-scroll bits with the ones from temp VRAM.
-void reset_vram_vert()
-{
-	vram_address = (vram_address & 0b10000011111) | (vram_temp & 0b111101111100000);
 }
 
 void load_render_registers()
@@ -682,7 +705,7 @@ unsigned char ppu_tick()
 				// Evaluating sprites here for now, in preparation for the next scanline.
 				evaluate_sprites();
 			}
-			else if (scan_pixel == 260)
+			else if (scan_pixel == 284)
 			{
 				load_sprites();
 			}
