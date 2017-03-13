@@ -596,6 +596,10 @@ unsigned char ppu_tick()
 		{
 			reset_vram_vert();
 		}
+		else if (scan_pixel == 284 && (!render_disable))
+		{
+			load_sprites();
+		}
 		// Load the first two tiles of the next scanline.
 		else if ((scan_pixel >= 320) && (scan_pixel <= 336) && ((scan_pixel % 8) == 1) && (!render_disable))
 		{

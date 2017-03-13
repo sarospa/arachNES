@@ -33,8 +33,7 @@ void check_irq_clock(unsigned int address)
 		{
 			irq_counter = irq_latch_register;
 		}
-		
-		if (irq_counter > 0)
+		else if (irq_counter > 0)
 		{
 			irq_counter--;
 			if ((irq_counter == 0) && irq_enable_register)
