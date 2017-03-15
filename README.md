@@ -20,6 +20,7 @@ If you'd like to submit an issue, please prepend the issue title with the name o
 01: MMC1
 02: UNROM
 04: MMC3
+07: AxROM
 
 If you aren't sure what mapper a game has, the emulator itself should report a warning that a ROM's mapper is unsupported, if you're logging the output to a file. If not, it's fairly safe to assume that if the game doesn't boot, its mapper is not supported. If you wish to open an issue for a game not booting, please confirm that the ROM has a supported mapper first.
 
