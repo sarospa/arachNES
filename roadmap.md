@@ -1,4 +1,4 @@
-#Roadmap
+# Roadmap
 
 This is my plan for where arachNES, as a project, is ultimately going. Since this is primarily a hobby project, the goal here is to follow my interests, rather than worrying too much about making a great emulator. There's no need for me to compete with all the great NES emulators that are already out there, when I'm just doing this for fun. That said, here are the items I want to finish before I'll consider this project complete.
 
