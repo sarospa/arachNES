@@ -770,6 +770,7 @@ void mix_audio()
 	if ((pulse_1_timer_value < 8) || (pulse_1_length_counter == 0))
 	{
 		pulse_1_volume = 0;
+		pulse_1_high = 0;
 	}
 	
 	duty_select = (pulse_2_control >> 6) & 0b11;
@@ -789,6 +790,7 @@ void mix_audio()
 	if ((pulse_2_timer_value < 8) || (pulse_2_length_counter == 0))
 	{
 		pulse_2_volume = 0;
+		pulse_2_high = 0;
 	}
 	
 	unsigned char noise_volume_flag = (noise_control & 0b00010000) == 0b00010000;
@@ -805,6 +807,7 @@ void mix_audio()
 	if (noise_length_counter == 0)
 	{
 		noise_volume = 0;
+		noise_high = 0;
 	}
 	
 	float pulse_1_mix = ((0.00752 * pulse_1_volume) - (0.00752 * (pulse_1_high / 2.0))) * !pulse_1_silence;
@@ -841,15 +844,22 @@ void apu_tick()
 	
 	if ((triangle_linear_counter > 0) && (triangle_length_counter > 0))
 	{
-		if (triangle_timer_count == 0)
+		unsigned int triangle_timer = triangle_timer_low + ((triangle_timer_high & 0b111) << 8);
+		
+		// Artificially silence the triangle if it's set to an extremely high frequency
+		if (triangle_timer > 0)
 		{
-			sequencer_index = (sequencer_index + 1) % sequencer_size;
-			triangle_timer_count = triangle_timer_low + ((triangle_timer_high & 0b111) << 8);
+			if (triangle_timer_count == 0)
+			{
+				sequencer_index = (sequencer_index + 1) % sequencer_size;
+				triangle_timer_count = triangle_timer;
+			}
+			else
+			{
+				triangle_timer_count--;
+			}
 		}
-		else
-		{
-			triangle_timer_count--;
-		}
+		
 	}
 	
 	if ((apu_status & 0b100) == 0)
@@ -910,19 +920,20 @@ void apu_tick()
 				access_cpu_memory(&dmc_sample_buffer, dmc_current_address, READ);
 				dmc_bytes_remaining--;
 				dmc_bits_remaining = 8;
-			}
-			else if (dmc_loop)
-			{
-				dmc_silence_flag = 0;
-				// Sample address = %11AAAAAA.AA000000
-				dmc_current_address = 0xC000 | (dmc_sample_address << 6);
-				// Sample length = %LLLL.LLLL0001
-				dmc_bytes_remaining = (dmc_sample_length << 4) | 1;
-				// TODO: This is a bit quick and dirty. To be more cycle-accurate, should halt
-				// the CPU to allow it to do a read from memory. But it works for now.
-				access_cpu_memory(&dmc_sample_buffer, dmc_current_address, READ);
-				dmc_bytes_remaining--;
-				dmc_bits_remaining = 8;
+				
+				if ((dmc_bytes_remaining == 0) && dmc_loop)
+				{
+					dmc_silence_flag = 0;
+					// Sample address = %11AAAAAA.AA000000
+					dmc_current_address = 0xC000 | (dmc_sample_address << 6);
+					// Sample length = %LLLL.LLLL0001
+					dmc_bytes_remaining = (dmc_sample_length << 4) | 1;
+					// TODO: This is a bit quick and dirty. To be more cycle-accurate, should halt
+					// the CPU to allow it to do a read from memory. But it works for now.
+					access_cpu_memory(&dmc_sample_buffer, dmc_current_address, READ);
+					dmc_bytes_remaining--;
+					dmc_bits_remaining = 8;
+				}
 			}
 			else
 			{
