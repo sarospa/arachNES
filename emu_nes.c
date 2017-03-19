@@ -282,10 +282,6 @@ void handle_user_input()
 	while (queued_event || pause_emulator)
 	{
 		queued_event = SDL_PollEvent(&event);
-		if (pause_emulator)
-		{
-			SDL_Delay(10);
-		}
 		
 		if (queued_event)
 		{
@@ -595,6 +591,10 @@ void handle_user_input()
 					break;
 				}
 			}
+		}
+		else if (pause_emulator)
+		{
+			SDL_Delay(10);
 		}
 	}
 }
