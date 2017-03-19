@@ -22,10 +22,10 @@ bin/%.o: mappers/%.c
 	mkdir -p bin
 	$(CC) -c $(CFLAGS) $(CPPFLAGS) -o $@ $<
 
-bin/$(appname): bin/emu_nes.o  bin/nes_cpu.o  bin/nes_ppu.o bin/controller.o bin/cartridge.o bin/nes_apu.o bin/nrom_00.o bin/mmc1_01.o bin/unrom_02.o bin/cnrom_03.o bin/mmc3_04.o bin/axrom_07.o bin/arach_play.o
+bin/$(appname): bin/emu_nes.o  bin/nes_cpu.o  bin/nes_ppu.o bin/controller.o bin/cartridge.o bin/nes_apu.o bin/nrom_00.o bin/mmc1_01.o bin/unrom_02.o bin/cnrom_03.o bin/mmc3_04.o bin/axrom_07.o bin/mmc2_09.o bin/arach_play.o
 	$(CC) $(LDFLAGS) -o $@ $^ $(LIBS)
 
-bin/$(moviename): bin/emu_nes.o  bin/nes_cpu.o  bin/nes_ppu.o bin/controller.o bin/cartridge.o bin/nes_apu.o bin/nrom_00.o bin/mmc1_01.o bin/unrom_02.o bin/cnrom_03.o bin/mmc3_04.o bin/axrom_07.o bin/arach_movie.o
+bin/$(moviename): bin/emu_nes.o  bin/nes_cpu.o  bin/nes_ppu.o bin/controller.o bin/cartridge.o bin/nes_apu.o bin/nrom_00.o bin/mmc1_01.o bin/unrom_02.o bin/cnrom_03.o bin/mmc3_04.o bin/axrom_07.o bin/mmc2_09.o bin/arach_movie.o
 	$(CC) $(LDFLAGS) -o $@ $^ $(LIBS)
 
 valgrind: bin/$(appname)

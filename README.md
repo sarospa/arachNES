@@ -16,11 +16,12 @@ The emulator gets its palette from palettes\ntscpalette.pal. The palette will li
 
 If you'd like to submit an issue, please prepend the issue title with the name of the game that the issue was found in, or (in the case of test ROMs or other non-game ROMs) the name of the ROM itself. Currently, the following mappers are supported:
 
-00: NROM
-01: MMC1
-02: UNROM
-04: MMC3
-07: AxROM
+00: NROM<br />
+01: MMC1<br />
+02: UNROM<br />
+04: MMC3<br />
+07: AxROM<br />
+09: MMC2
 
 If you aren't sure what mapper a game has, the emulator itself should report a warning that a ROM's mapper is unsupported, if you're logging the output to a file. If not, it's fairly safe to assume that if the game doesn't boot, its mapper is not supported. If you wish to open an issue for a game not booting, please confirm that the ROM has a supported mapper first.
 

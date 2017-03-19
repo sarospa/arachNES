@@ -11,6 +11,7 @@
 #include "mappers/cnrom_03.h"
 #include "mappers/mmc3_04.h"
 #include "mappers/axrom_07.h"
+#include "mappers/mmc2_09.h"
 
 typedef void (*get_ptr_handler) (unsigned char*, unsigned int, unsigned char);
 typedef void (*mapper_init) (void);
@@ -177,6 +178,14 @@ void cartridge_init(unsigned char rom_mapper, unsigned char prg_pages, unsigned 
 	mapper_nametable_table[0x07] = axrom_07_access_nametable;
 	mapper_save_state_table[0x07] = axrom_07_save_state;
 	mapper_load_state_table[0x07] = axrom_07_load_state;
+	
+	// MMC2
+	init_table[0x09] = fixed_init;
+	mapper_prg_table[0x09] = mmc2_access_prg_memory;
+	mapper_chr_table[0x09] = mmc2_access_chr_memory;
+	mapper_nametable_table[0x09] = mmc2_access_nametable_memory;
+	mapper_save_state_table[0x09] = mmc2_save_state;
+	mapper_load_state_table[0x09] = mmc2_load_state;
 	
 	init_table[mapper]();
 }
